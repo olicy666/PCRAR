@@ -841,15 +841,37 @@ def render_exam() -> None:
     input_paths = entry.get("input_paths", [])
     n_inputs = len(input_paths)
     
-    # 显示输入点云（共视图，确保尺度一致）
+    # 显示输入点云
     st.markdown("### 输入点云")
     reset_nonce = st.session_state.viewer_reset_nonce
-    input_labels = [f"输入{chr(65 + i)}" for i in range(n_inputs)]
-    input_contents = [
-        load_ply_text(resolve_ply_path(exam_root, path)) for path in input_paths
-    ]
-    if input_contents:
-        pl_multi_component(input_contents, input_labels, reset_nonce=reset_nonce)
+    
+    if n_inputs == 2:
+        # Relational: 2个输入
+        ref_cols = st.columns(2)
+        with ref_cols[0]:
+            st.caption("输入 A")
+            pl_component(
+                load_ply_text(resolve_ply_path(exam_root, input_paths[0])),
+                reset_nonce=reset_nonce,
+            )
+        with ref_cols[1]:
+            st.caption("输入 B")
+            pl_component(
+                load_ply_text(resolve_ply_path(exam_root, input_paths[1])),
+                reset_nonce=reset_nonce,
+            )
+    else:
+        # Analogical: 3个输入
+        ref_cols = st.columns(3)
+        input_labels = ["A", "B", "C"]
+        for i, col in enumerate(ref_cols):
+            if i < len(input_paths):
+                with col:
+                    st.caption(f"输入 {input_labels[i]}")
+                    pl_component(
+                        load_ply_text(resolve_ply_path(exam_root, input_paths[i])),
+                        reset_nonce=reset_nonce,
+                    )
 
     if show_big_view:
         st.markdown("### 合并点云视图")
@@ -888,15 +910,20 @@ def render_exam() -> None:
             if contents:
                 pl_multi_component(contents, selected, reset_nonce=reset_nonce)
 
-    # 显示候选点云（共视图，确保尺度一致）
+    # 显示候选点云
     st.markdown("### 候选答案")
     candidate_paths = entry.get("candidate_paths", [])
+    cand_cols = st.columns(4)
     cand_labels = ["A", "B", "C", "D"]
-    candidate_contents = [
-        load_ply_text(resolve_ply_path(exam_root, path)) for path in candidate_paths
-    ]
-    if candidate_contents:
-        pl_multi_component(candidate_contents, cand_labels[: len(candidate_contents)], reset_nonce=reset_nonce)
+    
+    for i, (col, label) in enumerate(zip(cand_cols, cand_labels)):
+        if i < len(candidate_paths):
+            with col:
+                st.caption(f"选项 {label}")
+                pl_component(
+                    load_ply_text(resolve_ply_path(exam_root, candidate_paths[i])),
+                    reset_nonce=reset_nonce,
+                )
 
     options = ["未作答", "A", "B", "C", "D"]
     current_answer = st.session_state.answers.get(idx, "未作答")
