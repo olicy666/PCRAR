@@ -807,6 +807,12 @@ def render_exam() -> None:
     
     st.subheader(f"题目 {idx + 1}/{TOTAL_QUESTIONS}")
     st.caption(f"题型: {task_name} | 规则: {rule_template}")
+    st.download_button(
+        "下载本题 meta.json",
+        data=json.dumps(entry, ensure_ascii=False, indent=2),
+        file_name=f"{entry.get('id','question')}_meta.json",
+        mime="application/json",
+    )
     
     control_cols = st.columns([1, 1, 6])
     with control_cols[0]:
