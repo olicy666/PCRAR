@@ -109,31 +109,16 @@ class PCRARDatasetGenerator:
         leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
         entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
         
-        # 采样规则和参数
-        rule, params = self._sample_rule(entity_a)
-        
-        # 生成 B = T(A)
-        entity_b = rule.apply(entity_a, params)
-        
-        # 生成正确答案 D* = T(B)
-        # 需要确保规则可以继续应用
-        if rule.can_apply(entity_b, params):
-            entity_correct = rule.apply(entity_b, params)
-        else:
-            # 如果不能继续应用，使用相反方向
-            reverse_params = RuleParams(
-                template=params.template,
-                axis=params.axis,
-                leaf_idx=params.leaf_idx,
-                direction=-params.direction,
-            )
-            if rule.can_apply(entity_b, reverse_params):
-                entity_correct = rule.apply(entity_b, reverse_params)
-                params = reverse_params
-            else:
-                # 回退：使用不同的规则
-                rule, params = self._sample_rule(entity_b)
+        # 采样规则和参数（保证同一规则能从 A 连续应用到 B）
+        max_attempts = 50
+        for attempt in range(max_attempts):
+            rule, params = self._sample_rule(entity_a)
+            entity_b = rule.apply(entity_a, params)
+            if rule.can_apply(entity_b, params):
                 entity_correct = rule.apply(entity_b, params)
+                break
+        else:
+            raise RuntimeError("Failed to sample a relational rule that can be applied twice.")
         
         # 生成干扰项
         distractors = []
