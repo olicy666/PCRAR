@@ -40,7 +40,9 @@ class PCRARConfig:
     task_mix: float = 0.5  # Relational 比例（0.5 表示一半 Relational，一半 Analogical）
     leaf_count_min: int = 2
     leaf_count_max: int = 3
-    allowed_ops: Optional[List[OpType]] = None
+    allowed_ops: Optional[List[OpType]] = field(
+        default_factory=lambda: [OpType.UNION, OpType.INTERSECT]
+    )
     rule_filter: Optional[Set[RuleTemplate]] = None
 
 
