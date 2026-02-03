@@ -57,6 +57,7 @@ class RuleParams:
     axis: Optional[str] = None  # 作用轴: r(size), R(pose), p(position), d(density)
     leaf_idx: Optional[int] = None  # 目标叶节点索引
     direction: int = 1  # 方向: +1/-1
+    rot_axis: Optional[str] = None  # 旋转轴: x/y/z（仅 Progression + R 使用）
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -64,6 +65,7 @@ class RuleParams:
             "axis": self.axis,
             "leaf_idx": self.leaf_idx,
             "direction": self.direction,
+            "rot_axis": self.rot_axis,
         }
 
 
@@ -112,12 +114,14 @@ class ProgressionRule(PCRARRule):
         axis = _choice_from_list(rng, ["r", "R", "p", "d"])
         # 随机方向
         direction = _choice_from_list(rng, [-1, 1])
+        rot_axis = _choice_from_list(rng, ["x", "y", "z"]) if axis == "R" else None
         
         return RuleParams(
             template=self.template,
             axis=axis,
             leaf_idx=None,
             direction=direction,
+            rot_axis=rot_axis,
         )
     
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
@@ -170,9 +174,11 @@ class ProgressionRule(PCRARRule):
                 new_idx = max(0, min(len(SIZE_LEVELS) - 1, idx + direction))
                 leaf.size_level = SIZE_LEVELS[new_idx]
         elif params.axis == "R":
-            # 全局姿态递进（+90 度）
+            # 全局姿态递进（按指定旋转轴步进 60 度）
             pose = list(new_entity.obs.global_pose_deg)
-            pose[0] = (pose[0] + direction * 90) % 360
+            axis = (params.rot_axis or "x").lower()
+            axis_idx = {"x": 0, "y": 1, "z": 2}.get(axis, 0)
+            pose[axis_idx] = (pose[axis_idx] + direction * 60) % 360
             new_entity.obs.global_pose_deg = tuple(pose)
         elif params.axis == "p":
             # 位置递进（整体：所有 leaf 同步 slot shift）

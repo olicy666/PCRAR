@@ -45,7 +45,7 @@ Attr(E) = (CSG, O)
 | Boolean Ops | CSG 操作类型 | Union, Diff, Intersect |
 | PartCount | 叶节点数量 | 2, 3 |
 | Size | 尺寸档位 | S(0.8), M(1.0), L(1.2) |
-| Pose | 离散旋转角度 | 0°, 90°, 180°, 270° |
+| Pose | 离散旋转角度 | 0°, 60°, 120°, 180°, 240°, 300° |
 | Position | 位置槽位 + delta 档 | slot: -1/0/+1, delta: Near/Mid/Far |
 | Density | 采样权重档位 | 均匀/偏左/偏右 等 |
 

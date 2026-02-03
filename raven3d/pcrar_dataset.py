@@ -425,7 +425,8 @@ class PCRARDatasetGenerator:
             if axis == "r":
                 core = f"递进规则：整体尺寸档位{dir_word}1（所有 leaf 同步，S/M/L）。"
             elif axis == "R":
-                core = f"递进规则：整体绕 X 轴旋转 {dir_sign}90°。"
+                rot_axis = (params.rot_axis or "X").upper()
+                core = f"递进规则：整体绕 {rot_axis} 轴旋转 {dir_sign}60°。"
             elif axis == "p":
                 core = f"递进规则：整体槽位 slot {shift_word}1 格（所有 leaf 同步）。"
             elif axis == "d":

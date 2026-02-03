@@ -59,7 +59,7 @@ DELTA_LEVEL_MAP: Dict[DeltaLevel, float] = {
 }
 
 # 离散角度列表（度）
-DISCRETE_ANGLES = [0, 90, 180, 270]
+DISCRETE_ANGLES = [0, 60, 120, 180, 240, 300]
 
 # Primitive 类型列表（用于循环）
 PRIM_TYPE_CYCLE = [PrimType.SPHERE, PrimType.BOX, PrimType.CYLINDER, PrimType.CONE]
