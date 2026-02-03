@@ -297,20 +297,20 @@ class PCRARDatasetGenerator:
         new_entity = entity.copy()
         leaves = new_entity.get_leaves()
         
-        if params.axis == "r" and params.leaf_idx is not None and params.leaf_idx < len(leaves):
-            # 确保尺寸可以变化
-            leaf = leaves[params.leaf_idx]
-            if params.direction == 1:
-                leaf.size_level = SIZE_LEVELS[0]  # 设为最小，可以增加
-            else:
-                leaf.size_level = SIZE_LEVELS[-1]  # 设为最大，可以减少
-        elif params.axis == "p" and params.leaf_idx is not None and params.leaf_idx < len(leaves):
-            # 确保位置可以变化
-            leaf = leaves[params.leaf_idx]
-            if params.direction == 1:
-                leaf.slot = SLOTS[0]
-            else:
-                leaf.slot = SLOTS[-1]
+        if params.axis == "r":
+            # 确保尺寸可以变化（整体：所有 leaf）
+            for leaf in leaves:
+                if params.direction == 1:
+                    leaf.size_level = SIZE_LEVELS[0]  # 设为最小，可以增加
+                else:
+                    leaf.size_level = SIZE_LEVELS[-1]  # 设为最大，可以减少
+        elif params.axis == "p":
+            # 确保位置可以变化（整体：所有 leaf）
+            for leaf in leaves:
+                if params.direction == 1:
+                    leaf.slot = SLOTS[0]
+                else:
+                    leaf.slot = SLOTS[-1]
         
         return new_entity
     
@@ -406,11 +406,11 @@ class PCRARDatasetGenerator:
 
         if rule.template == RuleTemplate.PROGRESSION:
             if axis == "r":
-                core = f"递进规则：leaf{leaf_idx} 尺寸档位{dir_word}1（S/M/L）。"
+                core = f"递进规则：整体尺寸档位{dir_word}1（所有 leaf 同步，S/M/L）。"
             elif axis == "R":
-                core = f"递进规则：leaf{leaf_idx} 绕 X 轴旋转 {dir_sign}90°。"
+                core = f"递进规则：整体绕 X 轴旋转 {dir_sign}90°。"
             elif axis == "p":
-                core = f"递进规则：leaf{leaf_idx} 槽位 slot {shift_word}1 格。"
+                core = f"递进规则：整体槽位 slot {shift_word}1 格（所有 leaf 同步）。"
             elif axis == "d":
                 core = f"递进规则：采样密度档位{dir_word}1（权重变化）。"
             else:

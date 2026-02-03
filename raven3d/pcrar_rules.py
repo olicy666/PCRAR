@@ -110,40 +110,39 @@ class ProgressionRule(PCRARRule):
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
         # 随机选择轴
         axis = _choice_from_list(rng, ["r", "R", "p", "d"])
-        # 随机选择叶节点
-        leaves = entity.get_leaves()
-        leaf_idx = int(rng.integers(len(leaves)))
         # 随机方向
         direction = _choice_from_list(rng, [-1, 1])
         
         return RuleParams(
             template=self.template,
             axis=axis,
-            leaf_idx=leaf_idx,
+            leaf_idx=None,
             direction=direction,
         )
     
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
         """检查是否可以应用（避免越界）"""
         leaves = entity.get_leaves()
-        if params.leaf_idx >= len(leaves):
-            return False
-        
-        leaf = leaves[params.leaf_idx]
         direction = params.direction
         
         if params.axis == "r":
-            idx = SIZE_LEVELS.index(leaf.size_level)
-            new_idx = idx + direction
-            return 0 <= new_idx < len(SIZE_LEVELS)
+            for leaf in leaves:
+                idx = SIZE_LEVELS.index(leaf.size_level)
+                new_idx = idx + direction
+                if not (0 <= new_idx < len(SIZE_LEVELS)):
+                    return False
+            return True
         elif params.axis == "R":
             # 旋转总是可以（模 360）
             return True
         elif params.axis == "p":
             # 检查 slot 或 delta_level
-            slot_idx = SLOTS.index(leaf.slot)
-            new_slot_idx = slot_idx + direction
-            return 0 <= new_slot_idx < len(SLOTS)
+            for leaf in leaves:
+                slot_idx = SLOTS.index(leaf.slot)
+                new_slot_idx = slot_idx + direction
+                if not (0 <= new_slot_idx < len(SLOTS)):
+                    return False
+            return True
         elif params.axis == "d":
             # 密度档位
             leaf_count = len(leaves)
@@ -157,24 +156,25 @@ class ProgressionRule(PCRARRule):
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:
         new_entity = entity.copy()
         leaves = new_entity.get_leaves()
-        leaf = leaves[params.leaf_idx]
         direction = params.direction
         
         if params.axis == "r":
-            # 尺寸递进
-            idx = SIZE_LEVELS.index(leaf.size_level)
-            new_idx = max(0, min(len(SIZE_LEVELS) - 1, idx + direction))
-            leaf.size_level = SIZE_LEVELS[new_idx]
+            # 尺寸递进（整体：所有 leaf 同步）
+            for leaf in leaves:
+                idx = SIZE_LEVELS.index(leaf.size_level)
+                new_idx = max(0, min(len(SIZE_LEVELS) - 1, idx + direction))
+                leaf.size_level = SIZE_LEVELS[new_idx]
         elif params.axis == "R":
-            # 姿态递进（+90 度）
-            pose = list(leaf.local_pose_deg)
+            # 全局姿态递进（+90 度）
+            pose = list(new_entity.obs.global_pose_deg)
             pose[0] = (pose[0] + direction * 90) % 360
-            leaf.local_pose_deg = tuple(pose)
+            new_entity.obs.global_pose_deg = tuple(pose)
         elif params.axis == "p":
-            # 位置递进（slot shift）
-            slot_idx = SLOTS.index(leaf.slot)
-            new_slot_idx = max(0, min(len(SLOTS) - 1, slot_idx + direction))
-            leaf.slot = SLOTS[new_slot_idx]
+            # 位置递进（整体：所有 leaf 同步 slot shift）
+            for leaf in leaves:
+                slot_idx = SLOTS.index(leaf.slot)
+                new_slot_idx = max(0, min(len(SLOTS) - 1, slot_idx + direction))
+                leaf.slot = SLOTS[new_slot_idx]
         elif params.axis == "d":
             # 密度档位递进
             leaf_count = len(leaves)
