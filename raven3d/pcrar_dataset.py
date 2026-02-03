@@ -291,8 +291,8 @@ class PCRARDatasetGenerator:
         params: RuleParams,
     ) -> PCRAREntity:
         """调整实体以满足规则前置条件"""
-        from .csg import SizeLevel, SLOTS
-        from .pcrar_rules import SIZE_LEVELS
+        from .csg import SizeLevel
+        from .pcrar_rules import SIZE_LEVELS, SLOTS
         
         new_entity = entity.copy()
         leaves = new_entity.get_leaves()
