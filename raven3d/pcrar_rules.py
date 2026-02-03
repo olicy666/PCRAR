@@ -133,6 +133,11 @@ class ProgressionRule(PCRARRule):
                     return False
             return True
         elif params.axis == "R":
+            # 避免旋转落在高对称结构（球体/相交体）上，导致外观变化不可见
+            if any(leaf.prim_type == PrimType.SPHERE for leaf in leaves):
+                return False
+            if any(op.op == OpType.INTERSECT for op in get_all_ops(entity.csg)):
+                return False
             # 旋转总是可以（模 360）
             return True
         elif params.axis == "p":
@@ -236,24 +241,26 @@ class ToggleRule(PCRARRule):
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.TOGGLE]
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
-        # 找到所有可切换的操作节点
+        # 找到所有可切换的操作节点（Union / Diff）
+        ops = [op for op in get_all_ops(entity.csg) if op.op in (OpType.UNION, OpType.DIFF)]
+        op_idx = int(rng.integers(len(ops))) if ops else 0
         return RuleParams(
             template=self.template,
             axis="op",
-            leaf_idx=0,  # 操作节点索引
+            leaf_idx=op_idx,
             direction=1,
         )
     
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
-        # 需要有操作节点
-        ops = get_all_ops(entity.csg)
+        # 需要有可切换的操作节点（Union / Diff）
+        ops = [op for op in get_all_ops(entity.csg) if op.op in (OpType.UNION, OpType.DIFF)]
         return len(ops) > 0
     
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:
         new_entity = entity.copy()
         
-        # 找到并切换第一个操作节点
-        ops = get_all_ops(new_entity.csg)
+        # 找到并切换可切换操作节点
+        ops = [op for op in get_all_ops(new_entity.csg) if op.op in (OpType.UNION, OpType.DIFF)]
         if not ops:
             return new_entity
         

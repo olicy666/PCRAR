@@ -466,7 +466,22 @@ def generate_exam(username: str, mode: str) -> None:
     generator.generate_dataset(exam_dir, TOTAL_QUESTIONS)
     
     meta_path = exam_dir / "meta.json"
-    st.session_state.exam_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    exam_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    # 校验规则过滤是否生效
+    expected_template = rule_template.value
+    mismatches = [
+        i for i, entry in enumerate(exam_meta)
+        if entry.get("rule", {}).get("template") != expected_template
+    ]
+    if mismatches:
+        st.session_state.exam_meta = []
+        st.session_state.exam_generated = False
+        st.error(
+            f"生成的题目规则与所选模式不一致（期望 {expected_template}）。"
+            f"不一致题目索引示例: {mismatches[:5]}"
+        )
+        return
+    st.session_state.exam_meta = exam_meta
     st.session_state.exam_generated = True
 
 
