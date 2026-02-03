@@ -41,7 +41,7 @@ class PCRARConfig:
     leaf_count_min: int = 2
     leaf_count_max: int = 3
     allowed_ops: Optional[List[OpType]] = field(
-        default_factory=lambda: [OpType.UNION, OpType.INTERSECT]
+        default_factory=lambda: [OpType.UNION]
     )
     rule_filter: Optional[Set[RuleTemplate]] = None
 
