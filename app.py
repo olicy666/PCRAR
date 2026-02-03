@@ -474,6 +474,20 @@ def load_ply_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def resolve_ply_path(exam_root: Path, relative_path: str) -> Path:
+    """解析 PLY 文件的相对路径
+    
+    Args:
+        exam_root: 考试数据根目录
+        relative_path: 相对路径，如 "sample_000000/in_0.ply"
+        
+    Returns:
+        完整的 Path 对象
+    """
+    # 直接拼接相对路径
+    return exam_root / relative_path
+
+
 def build_result(
     username: str, mode: str, meta: List[Dict], answers: Dict[int, str]
 ) -> Dict:
@@ -815,13 +829,13 @@ def render_exam() -> None:
         with ref_cols[0]:
             st.caption("输入 A")
             pl_component(
-                load_ply_text(exam_root / input_paths[0].split("/")[-1] if "/" in input_paths[0] else exam_root / entry["id"] / input_paths[0].split("/")[-1]),
+                load_ply_text(resolve_ply_path(exam_root, input_paths[0])),
                 reset_nonce=reset_nonce,
             )
         with ref_cols[1]:
             st.caption("输入 B")
             pl_component(
-                load_ply_text(exam_root / input_paths[1].split("/")[-1] if "/" in input_paths[1] else exam_root / entry["id"] / input_paths[1].split("/")[-1]),
+                load_ply_text(resolve_ply_path(exam_root, input_paths[1])),
                 reset_nonce=reset_nonce,
             )
     else:
@@ -832,14 +846,8 @@ def render_exam() -> None:
             if i < len(input_paths):
                 with col:
                     st.caption(f"输入 {input_labels[i]}")
-                    # 解析路径
-                    path_parts = input_paths[i].split("/")
-                    if len(path_parts) > 1:
-                        ply_path = exam_root / path_parts[0] / path_parts[1]
-                    else:
-                        ply_path = exam_root / entry["id"] / path_parts[0]
                     pl_component(
-                        load_ply_text(ply_path),
+                        load_ply_text(resolve_ply_path(exam_root, input_paths[i])),
                         reset_nonce=reset_nonce,
                     )
 
@@ -876,12 +884,7 @@ def render_exam() -> None:
             for label in selected:
                 path = label_to_path.get(label, "")
                 if path:
-                    path_parts = path.split("/")
-                    if len(path_parts) > 1:
-                        ply_path = exam_root / path_parts[0] / path_parts[1]
-                    else:
-                        ply_path = exam_root / entry["id"] / path_parts[0]
-                    contents.append(load_ply_text(ply_path))
+                    contents.append(load_ply_text(resolve_ply_path(exam_root, path)))
             if contents:
                 pl_multi_component(contents, selected, reset_nonce=reset_nonce)
 
@@ -895,14 +898,8 @@ def render_exam() -> None:
         if i < len(candidate_paths):
             with col:
                 st.caption(f"选项 {label}")
-                path = candidate_paths[i]
-                path_parts = path.split("/")
-                if len(path_parts) > 1:
-                    ply_path = exam_root / path_parts[0] / path_parts[1]
-                else:
-                    ply_path = exam_root / entry["id"] / path_parts[0]
                 pl_component(
-                    load_ply_text(ply_path),
+                    load_ply_text(resolve_ply_path(exam_root, candidate_paths[i])),
                     reset_nonce=reset_nonce,
                 )
 
