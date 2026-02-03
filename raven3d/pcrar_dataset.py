@@ -118,6 +118,8 @@ class PCRARDatasetGenerator:
                     rule, params = self._sample_rule(entity_a)
                 except RuntimeError:
                     continue
+                if params.axis in ("r", "p"):
+                    entity_a = self._adjust_entity_for_rule(entity_a, rule, params)
                 entity_b = rule.apply(entity_a, params)
                 if rule.can_apply(entity_b, params):
                     entity_correct = rule.apply(entity_b, params)
