@@ -7,37 +7,71 @@ import tempfile
 from datetime import datetime
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from raven3d.dataset import DatasetGenerator, GenerationConfig
-from raven3d.factory import create_default_registry
-from raven3d.rules.groups import list_all_rules
+from raven3d.pcrar_dataset import PCRARDatasetGenerator, PCRARConfig
+from raven3d.pcrar_rules import RuleTemplate
 
 RECORDS_PATH = Path("exam_records.csv")
 RESULTS_DIR = Path("results")
 TOTAL_QUESTIONS = 20
 PLY_HEIGHT = 320
 BIG_PLY_HEIGHT = 560
-POINTS_PER_CLOUD = 16384
+POINTS_PER_CLOUD = 8192
 
+# 规则名称映射
+RULE_NAMES = {
+    RuleTemplate.PROGRESSION: "递进规则",
+    RuleTemplate.CYCLE: "循环规则",
+    RuleTemplate.TOGGLE: "切换规则",
+    RuleTemplate.COUNT: "增减规则",
+    RuleTemplate.CONSERVATION: "守恒规则",
+    RuleTemplate.PERMUTATION: "置换规则",
+    RuleTemplate.SYMMETRY: "对称规则",
+}
 
-def sort_rule_ids(rule_ids: List[str]) -> List[str]:
-    def key(rule_id: str) -> tuple:
-        if rule_id.startswith("R") and "-" in rule_id:
-            group_part, _, idx_part = rule_id.partition("-")
-            group_num = group_part[1:]
-            if group_num.isdigit() and idx_part.isdigit():
-                return (int(group_num), int(idx_part), rule_id)
-        return (99, 999, rule_id)
+# 任务类型
+TASK_TYPES = ["relational", "analogical"]
+TASK_TYPE_NAMES = {
+    "relational": "关系推理",
+    "analogical": "类比推理",
+}
 
-    return sorted(rule_ids, key=key)
+# 生成规则 ID 列表：任务类型-规则编号
+def generate_mode_list() -> List[str]:
+    """生成模式列表：关系推理-规则1, 关系推理-规则2, ... 类比推理-规则1, ..."""
+    modes = []
+    for task_type in TASK_TYPES:
+        task_name = TASK_TYPE_NAMES[task_type]
+        for idx, template in enumerate(RuleTemplate, 1):
+            mode_id = f"{task_name}-规则{idx}"
+            modes.append(mode_id)
+    return modes
 
+# 模式 ID 到 (task_type, rule_template) 的映射
+def parse_mode(mode: str) -> tuple[str, RuleTemplate]:
+    """解析模式 ID，返回 (task_type, rule_template)"""
+    if mode.startswith("关系推理"):
+        task_type = "relational"
+        rule_num = int(mode.split("规则")[1])
+    else:
+        task_type = "analogical"
+        rule_num = int(mode.split("规则")[1])
+    template = list(RuleTemplate)[rule_num - 1]
+    return task_type, template
 
-RULE_IDS = sort_rule_ids(list_all_rules())
+def get_mode_description(mode: str) -> str:
+    """获取模式描述"""
+    task_type, template = parse_mode(mode)
+    task_name = TASK_TYPE_NAMES[task_type]
+    rule_name = RULE_NAMES[template]
+    return f"{task_name} - {rule_name} ({template.value})"
+
+MODE_IDS = generate_mode_list()
 RECORD_COLUMNS = ["username", "mode", "score", "total", "accuracy", "reason", "result_path"]
 
 
@@ -357,7 +391,7 @@ def init_state() -> None:
         "logged_in": False,
         "is_admin": False,
         "username": "",
-        "mode": RULE_IDS[0] if RULE_IDS else "",
+        "mode": MODE_IDS[0] if MODE_IDS else "",
         "question_index": 0,
         "answers": {},
         "exam_generated": False,
@@ -371,13 +405,13 @@ def init_state() -> None:
         "seed": None,
         "viewer_reset_nonce": 0,
         "show_big_view": True,
-        "big_view_selection": ["Ref1", "Ref2"],
+        "big_view_selection": ["输入A", "输入B"],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
-    if RULE_IDS and st.session_state.get("mode") not in RULE_IDS:
-        st.session_state["mode"] = RULE_IDS[0]
+    if MODE_IDS and st.session_state.get("mode") not in MODE_IDS:
+        st.session_state["mode"] = MODE_IDS[0]
 
 
 def reset_exam_state() -> None:
@@ -400,14 +434,15 @@ def reset_exam_state() -> None:
     st.session_state.seed = None
     st.session_state.viewer_reset_nonce = 0
     st.session_state.show_big_view = True
-    st.session_state.big_view_selection = ["Ref1", "Ref2"]
-    for label in ["Ref1", "Ref2", "A", "B", "C", "D"]:
+    st.session_state.big_view_selection = ["输入A", "输入B"]
+    for label in ["输入A", "输入B", "输入C", "A", "B", "C", "D"]:
         st.session_state.pop(f"big_view_{label}", None)
     for idx in range(TOTAL_QUESTIONS):
         st.session_state.pop(f"answer_{idx}", None)
 
 
 def generate_exam(username: str, mode: str) -> None:
+    """生成 PCRAR 考试试卷"""
     reset_exam_state()
     temp_dir_obj = tempfile.TemporaryDirectory()
     exam_dir = Path(temp_dir_obj.name)
@@ -415,10 +450,21 @@ def generate_exam(username: str, mode: str) -> None:
     st.session_state.exam_dir = str(exam_dir)
     seed = stable_seed(username, mode)
     st.session_state.seed = seed
-    registry = create_default_registry()
-    config = GenerationConfig(n_points=POINTS_PER_CLOUD, rule_filter={mode})
-    generator = DatasetGenerator(registry, config=config, seed=seed)
+    
+    # 解析模式
+    task_type, rule_template = parse_mode(mode)
+    
+    # 设置任务类型比例
+    task_mix = 1.0 if task_type == "relational" else 0.0
+    
+    config = PCRARConfig(
+        n_points=POINTS_PER_CLOUD,
+        task_mix=task_mix,
+        rule_filter={rule_template},
+    )
+    generator = PCRARDatasetGenerator(config=config, seed=seed)
     generator.generate_dataset(exam_dir, TOTAL_QUESTIONS)
+    
     meta_path = exam_dir / "meta.json"
     st.session_state.exam_meta = json.loads(meta_path.read_text(encoding="utf-8"))
     st.session_state.exam_generated = True
@@ -436,13 +482,22 @@ def build_result(
     wrong_reasons: List[str] = []
     for idx, entry in enumerate(meta):
         user_option = answers.get(idx)
-        gt_option = entry.get("gt_option")
-        cand_reasons = {
-            "A": entry.get("cand1_reason", ""),
-            "B": entry.get("cand2_reason", ""),
-            "C": entry.get("cand3_reason", ""),
-            "D": entry.get("cand4_reason", ""),
-        }
+        # 新格式使用 gt_label
+        gt_option = entry.get("gt_label", "")
+        
+        # 干扰项原因
+        distractors = entry.get("notes", {}).get("distractors", [])
+        cand_reasons = {}
+        labels = ["A", "B", "C", "D"]
+        gt_idx = entry.get("gt_index", 0)
+        d_idx = 0
+        for i, label in enumerate(labels):
+            if i == gt_idx:
+                cand_reasons[label] = "符合规则的正确答案"
+            else:
+                cand_reasons[label] = distractors[d_idx] if d_idx < len(distractors) else "干扰项"
+                d_idx += 1
+        
         is_correct = user_option == gt_option
         if is_correct:
             correct_count += 1
@@ -452,10 +507,16 @@ def build_result(
             wrong_reason = cand_reasons.get(user_option, "")
         if not is_correct:
             wrong_reasons.append(wrong_reason or "未知原因")
+        
+        # 获取规则信息
+        rule_info = entry.get("rule", {})
+        rule_template = rule_info.get("template", "未知")
+        
         details.append(
             {
                 "id": entry.get("id", f"q{idx + 1:02d}"),
-                "rule_id": entry.get("rule_id", mode),
+                "task_type": entry.get("task_type", ""),
+                "rule_template": rule_template,
                 "gt_option": gt_option,
                 "user_option": user_option,
                 "is_correct": is_correct,
@@ -507,7 +568,7 @@ def load_records() -> pd.DataFrame:
 
 
 def render_admin() -> None:
-    st.title("SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D 管理后台")
+    st.title("PCRAR 3D推理考试 管理后台")
     if st.button("退出登录"):
         reset_exam_state()
         st.session_state.logged_in = False
@@ -576,13 +637,27 @@ def render_admin() -> None:
         else:
             st.warning("该记录的 result.json 文件不存在。")
 
-    st.subheader("规则平均正确率")
+    st.subheader("各规则平均正确率")
     mode_acc = df.groupby("mode")["accuracy"].mean()
-    line_df = pd.DataFrame(
-        {"accuracy": [mode_acc.get(rule_id, 0.0) for rule_id in RULE_IDS]},
-        index=RULE_IDS,
-    )
-    st.line_chart(line_df)
+    # 分组显示
+    relational_modes = [m for m in MODE_IDS if m.startswith("关系推理")]
+    analogical_modes = [m for m in MODE_IDS if m.startswith("类比推理")]
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write("**关系推理**")
+        rel_df = pd.DataFrame(
+            {"正确率": [mode_acc.get(m, 0.0) for m in relational_modes]},
+            index=[m.split("-")[1] for m in relational_modes],
+        )
+        st.bar_chart(rel_df)
+    with col2:
+        st.write("**类比推理**")
+        ana_df = pd.DataFrame(
+            {"正确率": [mode_acc.get(m, 0.0) for m in analogical_modes]},
+            index=[m.split("-")[1] for m in analogical_modes],
+        )
+        st.bar_chart(ana_df)
 
     st.download_button(
         "下载 CSV",
@@ -593,7 +668,7 @@ def render_admin() -> None:
 
 
 def render_exam() -> None:
-    st.title("SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D 逻辑推理考试")
+    st.title("PCRAR 3D推理考试")
     st.markdown(
         """
         <style>
@@ -611,14 +686,39 @@ def render_exam() -> None:
 
     st.sidebar.header("考试设置")
     st.sidebar.write(f"用户：{st.session_state.username}")
-
-    selected_mode = st.sidebar.selectbox(
-        "Mode (规则 ID)", RULE_IDS, index=RULE_IDS.index(st.session_state.mode)
+    
+    # 分组显示模式选择
+    st.sidebar.subheader("选择考试模式")
+    
+    # 任务类型选择
+    task_options = list(TASK_TYPE_NAMES.values())
+    current_mode = st.session_state.mode
+    current_task_name = current_mode.split("-")[0]
+    task_idx = task_options.index(current_task_name) if current_task_name in task_options else 0
+    
+    selected_task = st.sidebar.radio("题目类型", task_options, index=task_idx)
+    
+    # 规则选择
+    rule_labels = []
+    for idx, template in enumerate(RuleTemplate, 1):
+        rule_labels.append(f"规则{idx}: {RULE_NAMES[template]}")
+    
+    current_rule_num = int(current_mode.split("规则")[1]) if "规则" in current_mode else 1
+    selected_rule_idx = st.sidebar.selectbox(
+        "规则类型",
+        range(len(rule_labels)),
+        index=current_rule_num - 1,
+        format_func=lambda i: rule_labels[i],
     )
-    if selected_mode != st.session_state.mode:
-        st.session_state.mode = selected_mode
+    
+    new_mode = f"{selected_task}-规则{selected_rule_idx + 1}"
+    if new_mode != st.session_state.mode:
+        st.session_state.mode = new_mode
         reset_exam_state()
         st.sidebar.info("已切换模式，请重新生成试卷。")
+    
+    # 显示当前模式描述
+    st.sidebar.caption(get_mode_description(st.session_state.mode))
 
     button_label = "生成试卷" if not st.session_state.exam_generated else "重新生成试卷"
     if st.sidebar.button(button_label):
@@ -634,7 +734,40 @@ def render_exam() -> None:
         st.rerun()
 
     if not st.session_state.exam_generated:
-        st.info("请先在侧边栏生成试卷。")
+        st.info("请先在侧边栏选择考试模式并生成试卷。")
+        
+        # 显示模式说明
+        st.subheader("考试模式说明")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("### 关系推理 (Relational)")
+            st.markdown("""
+            - **输入**: 2个点云 (A, B)
+            - **任务**: 推断 A→B 的变换规则 T，从候选中选出 D* = T(B)
+            - **考察**: 认知属性/关系规律
+            """)
+        with col2:
+            st.markdown("### 类比推理 (Analogical)")
+            st.markdown("""
+            - **输入**: 3个点云 (A, B, C)
+            - **任务**: 已知 B=T(A)，从候选中选出 D* = T(C)
+            - **考察**: 将规律迁移到新几何体
+            """)
+        
+        st.subheader("规则说明")
+        rule_desc = {
+            "递进规则 (Progression)": "属性沿固定步长变化：尺寸/姿态/位置/密度的递进",
+            "循环规则 (Cycle)": "形状离散循环：球体→立方体→圆柱→圆锥→...",
+            "切换规则 (Toggle)": "布尔操作切换：Union ↔ Diff",
+            "增减规则 (Count)": "叶节点数量变化：2↔3",
+            "守恒规则 (Conservation)": "尺寸守恒：一增一减，总和不变",
+            "置换规则 (Permutation)": "位置槽位循环置换",
+            "对称规则 (Symmetry)": "对称变换：左+Δ，右-Δ",
+        }
+        for name, desc in rule_desc.items():
+            st.markdown(f"- **{name}**: {desc}")
+        
         return
 
     answered = len(st.session_state.answers)
@@ -651,8 +784,15 @@ def render_exam() -> None:
     idx = st.session_state.question_index
     entry = st.session_state.exam_meta[idx]
     exam_root = Path(st.session_state.exam_dir)
-
+    
+    # 获取任务类型
+    task_type = entry.get("task_type", "relational")
+    task_name = TASK_TYPE_NAMES.get(task_type, task_type)
+    rule_template = entry.get("rule", {}).get("template", "")
+    
     st.subheader(f"题目 {idx + 1}/{TOTAL_QUESTIONS}")
+    st.caption(f"题型: {task_name} | 规则: {rule_template}")
+    
     control_cols = st.columns([1, 1, 6])
     with control_cols[0]:
         if st.button("重置当前题目视角"):
@@ -661,24 +801,55 @@ def render_exam() -> None:
     with control_cols[1]:
         show_big_view = st.checkbox("大视图", key="show_big_view")
 
-    ref_cols = st.columns(2)
+    # 获取输入路径
+    input_paths = entry.get("input_paths", [])
+    n_inputs = len(input_paths)
+    
+    # 显示输入点云
+    st.markdown("### 输入点云")
     reset_nonce = st.session_state.viewer_reset_nonce
-    with ref_cols[0]:
-        st.caption("Ref1")
-        pl_component(
-            load_ply_text(exam_root / entry["ref1_path"]),
-            reset_nonce=reset_nonce,
-        )
-    with ref_cols[1]:
-        st.caption("Ref2")
-        pl_component(
-            load_ply_text(exam_root / entry["ref2_path"]),
-            reset_nonce=reset_nonce,
-        )
+    
+    if n_inputs == 2:
+        # Relational: 2个输入
+        ref_cols = st.columns(2)
+        with ref_cols[0]:
+            st.caption("输入 A")
+            pl_component(
+                load_ply_text(exam_root / input_paths[0].split("/")[-1] if "/" in input_paths[0] else exam_root / entry["id"] / input_paths[0].split("/")[-1]),
+                reset_nonce=reset_nonce,
+            )
+        with ref_cols[1]:
+            st.caption("输入 B")
+            pl_component(
+                load_ply_text(exam_root / input_paths[1].split("/")[-1] if "/" in input_paths[1] else exam_root / entry["id"] / input_paths[1].split("/")[-1]),
+                reset_nonce=reset_nonce,
+            )
+    else:
+        # Analogical: 3个输入
+        ref_cols = st.columns(3)
+        input_labels = ["A", "B", "C"]
+        for i, col in enumerate(ref_cols):
+            if i < len(input_paths):
+                with col:
+                    st.caption(f"输入 {input_labels[i]}")
+                    # 解析路径
+                    path_parts = input_paths[i].split("/")
+                    if len(path_parts) > 1:
+                        ply_path = exam_root / path_parts[0] / path_parts[1]
+                    else:
+                        ply_path = exam_root / entry["id"] / path_parts[0]
+                    pl_component(
+                        load_ply_text(ply_path),
+                        reset_nonce=reset_nonce,
+                    )
 
     if show_big_view:
         st.markdown("### 合并点云视图")
-        view_options = ["Ref1", "Ref2", "A", "B", "C", "D"]
+        if n_inputs == 2:
+            view_options = ["输入A", "输入B", "A", "B", "C", "D"]
+        else:
+            view_options = ["输入A", "输入B", "输入C", "A", "B", "C", "D"]
+        
         selected = []
         cols = st.columns(len(view_options))
         for col, label in zip(cols, view_options):
@@ -689,34 +860,51 @@ def render_exam() -> None:
             if checked:
                 selected.append(label)
         st.session_state.big_view_selection = selected
-        label_to_path = {
-            "Ref1": entry["ref1_path"],
-            "Ref2": entry["ref2_path"],
-            "A": entry["cand1_path"],
-            "B": entry["cand2_path"],
-            "C": entry["cand3_path"],
-            "D": entry["cand4_path"],
-        }
+        
+        # 构建路径映射
+        candidate_paths = entry.get("candidate_paths", [])
+        label_to_path = {}
+        for i, path in enumerate(input_paths):
+            label_to_path[f"输入{chr(65+i)}"] = path
+        for i, path in enumerate(candidate_paths):
+            label_to_path[chr(65+i)] = path
+        
         if not selected:
             st.info("请选择要显示的点云。")
         else:
-            contents = [load_ply_text(exam_root / label_to_path[label]) for label in selected]
-            pl_multi_component(contents, selected, reset_nonce=reset_nonce)
+            contents = []
+            for label in selected:
+                path = label_to_path.get(label, "")
+                if path:
+                    path_parts = path.split("/")
+                    if len(path_parts) > 1:
+                        ply_path = exam_root / path_parts[0] / path_parts[1]
+                    else:
+                        ply_path = exam_root / entry["id"] / path_parts[0]
+                    contents.append(load_ply_text(ply_path))
+            if contents:
+                pl_multi_component(contents, selected, reset_nonce=reset_nonce)
 
+    # 显示候选点云
+    st.markdown("### 候选答案")
+    candidate_paths = entry.get("candidate_paths", [])
     cand_cols = st.columns(4)
-    cand_paths = [
-        ("A", entry["cand1_path"]),
-        ("B", entry["cand2_path"]),
-        ("C", entry["cand3_path"]),
-        ("D", entry["cand4_path"]),
-    ]
-    for col, (label, rel_path) in zip(cand_cols, cand_paths):
-        with col:
-            st.caption(f"Option {label}")
-            pl_component(
-                load_ply_text(exam_root / rel_path),
-                reset_nonce=reset_nonce,
-            )
+    cand_labels = ["A", "B", "C", "D"]
+    
+    for i, (col, label) in enumerate(zip(cand_cols, cand_labels)):
+        if i < len(candidate_paths):
+            with col:
+                st.caption(f"选项 {label}")
+                path = candidate_paths[i]
+                path_parts = path.split("/")
+                if len(path_parts) > 1:
+                    ply_path = exam_root / path_parts[0] / path_parts[1]
+                else:
+                    ply_path = exam_root / entry["id"] / path_parts[0]
+                pl_component(
+                    load_ply_text(ply_path),
+                    reset_nonce=reset_nonce,
+                )
 
     options = ["未作答", "A", "B", "C", "D"]
     current_answer = st.session_state.answers.get(idx, "未作答")
@@ -761,7 +949,7 @@ def render_exam() -> None:
         result_path.write_text(st.session_state.result_json, encoding="utf-8")
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{safe_slug(st.session_state.username)}_{st.session_state.mode}_{timestamp}.json"
+        filename = f"{safe_slug(st.session_state.username)}_{safe_slug(st.session_state.mode)}_{timestamp}.json"
         persistent_path = RESULTS_DIR / filename
         persistent_path.write_text(st.session_state.result_json, encoding="utf-8")
         if not st.session_state.result_saved:
@@ -791,7 +979,13 @@ def render_exam() -> None:
 
 
 def render_login() -> None:
-    st.title("SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D 登录")
+    st.title("PCRAR 3D推理考试 登录")
+    st.markdown("""
+    **PCRAR**: Point Cloud Relational and Analogical Reasoning
+    
+    基于 CSG 布尔几何体的 3D 点云推理考试系统
+    """)
+    
     with st.form("login_form"):
         username = st.text_input("姓名/ID")
         password = st.text_input("管理员密码（仅 admin）", type="password")
@@ -817,7 +1011,7 @@ def render_login() -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="SPIRAL3D:Structured Perception to Intelligent Reasoning And Logic in 3D",
+        page_title="PCRAR 3D推理考试",
         layout="wide",
     )
     init_state()
