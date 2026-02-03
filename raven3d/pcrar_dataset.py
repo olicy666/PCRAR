@@ -65,6 +65,7 @@ class PCRARDatasetGenerator:
         sample_index: int,
         task_type: Optional[str] = None,
         correct_idx: Optional[int] = None,
+        preferred_axis: Optional[str] = None,
     ) -> Dict[str, Any]:
         """生成单个样本
         
@@ -88,15 +89,26 @@ class PCRARDatasetGenerator:
             correct_idx = int(self.rng.integers(self.config.n_candidates))
         
         if task_type == "relational":
-            return self._generate_relational_sample(output_root, sample_index, correct_idx)
+            return self._generate_relational_sample(
+                output_root,
+                sample_index,
+                correct_idx,
+                preferred_axis=preferred_axis,
+            )
         else:
-            return self._generate_analogical_sample(output_root, sample_index, correct_idx)
+            return self._generate_analogical_sample(
+                output_root,
+                sample_index,
+                correct_idx,
+                preferred_axis=preferred_axis,
+            )
     
     def _generate_relational_sample(
         self,
         output_root: Path,
         sample_index: int,
         correct_idx: int,
+        preferred_axis: Optional[str] = None,
     ) -> Dict[str, Any]:
         """生成 Relational（2→1）样本
         
@@ -115,7 +127,7 @@ class PCRARDatasetGenerator:
             entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
             for _ in range(max_rule_attempts):
                 try:
-                    rule, params = self._sample_rule(entity_a)
+                    rule, params = self._sample_rule(entity_a, preferred_axis=preferred_axis)
                 except RuntimeError:
                     continue
                 if params.axis in ("r", "p"):
@@ -178,6 +190,7 @@ class PCRARDatasetGenerator:
         output_root: Path,
         sample_index: int,
         correct_idx: int,
+        preferred_axis: Optional[str] = None,
     ) -> Dict[str, Any]:
         """生成 Analogical（3→1）样本
         
@@ -195,7 +208,7 @@ class PCRARDatasetGenerator:
             leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
             entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
             try:
-                rule, params = self._sample_rule(entity_a)
+                rule, params = self._sample_rule(entity_a, preferred_axis=preferred_axis)
             except RuntimeError:
                 continue
             entity_b = rule.apply(entity_a, params)
@@ -257,7 +270,11 @@ class PCRARDatasetGenerator:
             params=params,
         )
     
-    def _sample_rule(self, entity: PCRAREntity) -> Tuple[PCRARRule, RuleParams]:
+    def _sample_rule(
+        self,
+        entity: PCRAREntity,
+        preferred_axis: Optional[str] = None,
+    ) -> Tuple[PCRARRule, RuleParams]:
         """采样一条可应用的规则"""
         if self.config.rule_filter:
             # 从过滤后的规则中选择
@@ -266,7 +283,22 @@ class PCRARDatasetGenerator:
             for template in templates:
                 rule = get_rule(template)
                 for _ in range(20):
-                    params = rule.sample_params(self.rng, entity)
+                    if preferred_axis and template == RuleTemplate.PROGRESSION:
+                        direction = int(self.rng.choice([-1, 1]))
+                        rot_axis = (
+                            str(self.rng.choice(["x", "y", "z"]))
+                            if preferred_axis == "R"
+                            else None
+                        )
+                        params = RuleParams(
+                            template=RuleTemplate.PROGRESSION,
+                            axis=preferred_axis,
+                            leaf_idx=None,
+                            direction=direction,
+                            rot_axis=rot_axis,
+                        )
+                    else:
+                        params = rule.sample_params(self.rng, entity)
                     if rule.can_apply(entity, params):
                         return rule, params
             raise RuntimeError("No applicable rules for current rule_filter.")
@@ -487,11 +519,33 @@ class PCRARDatasetGenerator:
         task_types = ["relational"] * n_relational + ["analogical"] * n_analogical
         self.rng.shuffle(task_types)
         
+        axis_plan: Optional[List[str]] = None
+        if (
+            self.config.rule_filter
+            and len(self.config.rule_filter) == 1
+            and RuleTemplate.PROGRESSION in self.config.rule_filter
+        ):
+            axes = ["r", "R", "p", "d"]
+            base = num_samples // len(axes)
+            remainder = num_samples % len(axes)
+            axis_plan = []
+            for i, axis in enumerate(axes):
+                count = base + (1 if i < remainder else 0)
+                axis_plan.extend([axis] * count)
+            self.rng.shuffle(axis_plan)
+
         all_entries = []
         for idx in range(num_samples):
             correct_idx = int(correct_indices[idx])
             task_type = task_types[idx]
-            entry = self.generate_sample(output_root, idx, task_type=task_type, correct_idx=correct_idx)
+            preferred_axis = axis_plan[idx] if axis_plan else None
+            entry = self.generate_sample(
+                output_root,
+                idx,
+                task_type=task_type,
+                correct_idx=correct_idx,
+                preferred_axis=preferred_axis,
+            )
             all_entries.append(entry)
         
         # 保存汇总元数据
