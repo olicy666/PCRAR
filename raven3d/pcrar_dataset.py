@@ -12,7 +12,7 @@ import numpy as np
 
 from .io import write_meta, write_ply, ensure_dir
 from .csg import OpType
-from .pcrar_entity import PCRAREntity, sample_random_entity, DEFAULT_N_POINTS
+from .pcrar_entity import PCRAREntity, sample_random_entity, DEFAULT_N_POINTS, entities_equal
 from .pcrar_rules import (
     RuleTemplate, RuleParams, PCRARRule,
     sample_applicable_rule, generate_distractor, get_rule,
@@ -122,13 +122,22 @@ class PCRARDatasetGenerator:
         else:
             raise RuntimeError("Failed to sample a relational rule that can be applied twice.")
         
-        # 生成干扰项
+        # 生成干扰项（去重）
         distractors = []
         distractor_reasons = []
-        for _ in range(self.config.n_candidates - 1):
+        max_attempts = 50
+        while len(distractors) < self.config.n_candidates - 1:
             distractor, reason = generate_distractor(entity_b, rule, params, self.rng)
+            if entities_equal(distractor, entity_correct, check_obs=True):
+                continue
+            if any(entities_equal(distractor, d, check_obs=True) for d in distractors):
+                continue
             distractors.append(distractor)
             distractor_reasons.append(reason)
+            if len(distractors) < self.config.n_candidates - 1 and max_attempts > 0:
+                max_attempts -= 1
+        if len(distractors) < self.config.n_candidates - 1:
+            raise RuntimeError("Failed to generate unique distractors.")
         
         # 组装候选
         candidates = [None] * self.config.n_candidates
@@ -193,13 +202,22 @@ class PCRARDatasetGenerator:
         # 生成正确答案 D* = T(C)
         entity_correct = rule.apply(entity_c, params)
         
-        # 生成干扰项
+        # 生成干扰项（去重）
         distractors = []
         distractor_reasons = []
-        for _ in range(self.config.n_candidates - 1):
+        max_attempts = 50
+        while len(distractors) < self.config.n_candidates - 1:
             distractor, reason = generate_distractor(entity_c, rule, params, self.rng)
+            if entities_equal(distractor, entity_correct, check_obs=True):
+                continue
+            if any(entities_equal(distractor, d, check_obs=True) for d in distractors):
+                continue
             distractors.append(distractor)
             distractor_reasons.append(reason)
+            if len(distractors) < self.config.n_candidates - 1 and max_attempts > 0:
+                max_attempts -= 1
+        if len(distractors) < self.config.n_candidates - 1:
+            raise RuntimeError("Failed to generate unique distractors.")
         
         # 组装候选
         candidates = [None] * self.config.n_candidates
