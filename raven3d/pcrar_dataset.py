@@ -107,18 +107,21 @@ class PCRARDatasetGenerator:
         - 正确答案 D* = T(B)
         - 候选 {D1..Dk}，仅 D* 满足同一个 T
         """
-        # 生成初始实体 A
-        leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
-        entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
-        
-        # 采样规则和参数（保证同一规则能从 A 连续应用到 B）
-        max_attempts = 50
-        for attempt in range(max_attempts):
-            rule, params = self._sample_rule(entity_a)
-            entity_b = rule.apply(entity_a, params)
-            if rule.can_apply(entity_b, params):
-                entity_correct = rule.apply(entity_b, params)
-                break
+        # 生成初始实体 A，并确保规则可连续应用两次
+        max_entity_attempts = 50
+        max_rule_attempts = 50
+        for _ in range(max_entity_attempts):
+            leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
+            entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
+            for _ in range(max_rule_attempts):
+                rule, params = self._sample_rule(entity_a)
+                entity_b = rule.apply(entity_a, params)
+                if rule.can_apply(entity_b, params):
+                    entity_correct = rule.apply(entity_b, params)
+                    break
+            else:
+                continue
+            break
         else:
             raise RuntimeError("Failed to sample a relational rule that can be applied twice.")
         
@@ -181,15 +184,19 @@ class PCRARDatasetGenerator:
         - D* = T(C)
         - 生成候选，仅 D* 满足 T
         """
-        # 生成初始实体 A
-        leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
-        entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
-        
-        # 采样规则和参数
-        rule, params = self._sample_rule(entity_a)
-        
-        # 生成 B = T(A)
-        entity_b = rule.apply(entity_a, params)
+        # 生成初始实体 A，并确保规则可应用
+        max_entity_attempts = 50
+        for _ in range(max_entity_attempts):
+            leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
+            entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
+            try:
+                rule, params = self._sample_rule(entity_a)
+            except RuntimeError:
+                continue
+            entity_b = rule.apply(entity_a, params)
+            break
+        else:
+            raise RuntimeError("Failed to sample an analogical rule for the given config.")
         
         # 生成 C（与 A 结构相似但不同）
         entity_c = self._generate_compatible_entity(entity_a, rule, params)
@@ -253,9 +260,11 @@ class PCRARDatasetGenerator:
             self.rng.shuffle(templates)
             for template in templates:
                 rule = get_rule(template)
-                params = rule.sample_params(self.rng, entity)
-                if rule.can_apply(entity, params):
-                    return rule, params
+                for _ in range(20):
+                    params = rule.sample_params(self.rng, entity)
+                    if rule.can_apply(entity, params):
+                        return rule, params
+            raise RuntimeError("No applicable rules for current rule_filter.")
         
         return sample_applicable_rule(self.rng, entity)
     
