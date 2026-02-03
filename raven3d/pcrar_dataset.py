@@ -327,6 +327,7 @@ class PCRARDatasetGenerator:
         params: RuleParams,
     ) -> Dict[str, Any]:
         """保存样本并生成元数据"""
+        focus = self._build_focus(task_type, rule, params, inputs)
         sample_id = f"sample_{sample_index:06d}"
         sample_dir = output_root / sample_id
         ensure_dir(sample_dir)
@@ -361,6 +362,7 @@ class PCRARDatasetGenerator:
         meta = {
             "id": sample_id,
             "task_type": task_type,
+            "focus": focus,
             "input_paths": input_paths,
             "candidate_paths": candidate_paths,
             "gt_index": correct_idx,
@@ -382,6 +384,59 @@ class PCRARDatasetGenerator:
         
         write_meta(sample_dir / "meta.json", meta)
         return meta
+
+    def _build_focus(
+        self,
+        task_type: str,
+        rule: PCRARRule,
+        params: RuleParams,
+        inputs: List[PCRAREntity],
+    ) -> str:
+        """生成考点描述"""
+        axis = params.axis or ""
+        leaf_idx = params.leaf_idx
+        direction = params.direction
+        dir_sign = "+" if direction >= 0 else "-"
+        dir_word = "增加" if direction >= 0 else "减少"
+        shift_word = "右移" if direction >= 0 else "左移"
+        if task_type == "analogical":
+            prefix = "类比推理：先从 A→B 归纳规则，再将同一规则应用到 C 得到答案。"
+        else:
+            prefix = "关系推理：从 A→B 归纳规则，答案是对 B 的同规则延续。"
+
+        if rule.template == RuleTemplate.PROGRESSION:
+            if axis == "r":
+                core = f"递进规则：leaf{leaf_idx} 尺寸档位{dir_word}1（S/M/L）。"
+            elif axis == "R":
+                core = f"递进规则：leaf{leaf_idx} 绕 X 轴旋转 {dir_sign}90°。"
+            elif axis == "p":
+                core = f"递进规则：leaf{leaf_idx} 槽位 slot {shift_word}1 格。"
+            elif axis == "d":
+                core = f"递进规则：采样密度档位{dir_word}1（权重变化）。"
+            else:
+                core = "递进规则：沿同一属性做离散步进。"
+        elif rule.template == RuleTemplate.CYCLE:
+            core = f"循环规则：leaf{leaf_idx} 形状按序循环（Sphere→Box→Cylinder→Cone），方向 {dir_sign}1。"
+        elif rule.template == RuleTemplate.TOGGLE:
+            core = f"切换规则：CSG 操作 Union ↔ Diff 切换（op 索引 {leaf_idx}）。"
+        elif rule.template == RuleTemplate.COUNT:
+            if direction >= 0:
+                core = "增减规则：leaf 数量 +1（2→3）。"
+            else:
+                core = "增减规则：leaf 数量 -1（3→2）。"
+        elif rule.template == RuleTemplate.CONSERVATION:
+            core = f"守恒规则：leaf{leaf_idx} 尺寸 +1，leaf{direction} 尺寸 -1（一增一减）。"
+        elif rule.template == RuleTemplate.PERMUTATION:
+            core = f"置换规则：所有 leaf 的 slot 位置循环{shift_word}。"
+        elif rule.template == RuleTemplate.SYMMETRY:
+            if axis == "p":
+                core = f"对称规则：左右 leaf 位置对称变化（左 +1，右 -1）。"
+            else:
+                core = f"对称规则：左右 leaf 姿态对称变化（左 +90°，右 -90°）。"
+        else:
+            core = "规则变换：按指定模板对实体属性做变换。"
+
+        return f"{prefix}{core}"
     
     def generate_dataset(
         self,

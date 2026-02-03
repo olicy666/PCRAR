@@ -531,6 +531,7 @@ def build_result(
                 "id": entry.get("id", f"q{idx + 1:02d}"),
                 "task_type": entry.get("task_type", ""),
                 "rule_template": rule_template,
+                "focus": entry.get("focus", ""),
                 "gt_option": gt_option,
                 "user_option": user_option,
                 "is_correct": is_correct,
