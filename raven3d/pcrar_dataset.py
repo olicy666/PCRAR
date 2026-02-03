@@ -114,7 +114,10 @@ class PCRARDatasetGenerator:
             leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
             entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
             for _ in range(max_rule_attempts):
-                rule, params = self._sample_rule(entity_a)
+                try:
+                    rule, params = self._sample_rule(entity_a)
+                except RuntimeError:
+                    continue
                 entity_b = rule.apply(entity_a, params)
                 if rule.can_apply(entity_b, params):
                     entity_correct = rule.apply(entity_b, params)
