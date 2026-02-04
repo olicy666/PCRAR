@@ -427,8 +427,29 @@ def has_containment_risk(leaves: List["Leaf"], margin: float = 0.05) -> bool:
     return False
 
 
+def has_excessive_overlap(
+    leaves: List["Leaf"],
+    min_center_dist_ratio: float = 0.35,
+) -> bool:
+    """粗略判断 leaf 是否重叠过多（仅基于中心距离与尺度）
+
+    min_center_dist_ratio 约束中心距 >= ratio * (r_i + r_j)
+    """
+    for i in range(len(leaves)):
+        for j in range(i + 1, len(leaves)):
+            pos_i = leaves[i].get_position()[0]
+            pos_j = leaves[j].get_position()[0]
+            dist = abs(pos_i - pos_j)
+            r_i = SIZE_LEVEL_MAP[leaves[i].size_level]
+            r_j = SIZE_LEVEL_MAP[leaves[j].size_level]
+            min_dist = (r_i + r_j) * min_center_dist_ratio
+            if dist < min_dist:
+                return True
+    return False
+
+
 def enforce_leaf_separation(leaves: List["Leaf"]) -> None:
-    """调整 leaf 位置/位移档位，降低完全包含导致不可见的概率"""
+    """调整 leaf 位置/位移档位，降低完全包含或过度重叠导致不可见的概率"""
     if len(leaves) < 2:
         return
 
@@ -437,20 +458,28 @@ def enforce_leaf_separation(leaves: List["Leaf"]) -> None:
         if leaf.delta_level == DeltaLevel.NEAR:
             leaf.delta_level = DeltaLevel.MID
 
-    if not has_containment_risk(leaves):
+    if not has_containment_risk(leaves) and not has_excessive_overlap(leaves):
         return
 
     # 提升位移档位，拉开中心距
     for leaf in leaves:
         leaf.delta_level = DeltaLevel.FAR
 
-    if not has_containment_risk(leaves):
+    if not has_containment_risk(leaves) and not has_excessive_overlap(leaves):
         return
 
-    # 仍有风险时，强制拉开 slot
-    target_slots = [-1, 1] if len(leaves) == 2 else [-1, 0, 1]
-    for leaf, slot in zip(leaves, target_slots):
-        leaf.slot = slot
+    # 仍有风险时，强制拉开 slot（尽量让大尺寸占两端）
+    if len(leaves) == 2:
+        target_slots = [-1, 1]
+        for leaf, slot in zip(leaves, target_slots):
+            leaf.slot = slot
+    else:
+        # 3 个 leaf：按尺寸排序，把最大两个放在两端，最小的放中间
+        indexed = list(enumerate(leaves))
+        indexed.sort(key=lambda t: SIZE_LEVEL_MAP[t[1].size_level], reverse=True)
+        slot_order = [-1, 1, 0]
+        for (idx, _leaf), slot in zip(indexed, slot_order):
+            leaves[idx].slot = slot
 
 
 def sample_random_csg(
