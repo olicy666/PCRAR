@@ -66,9 +66,9 @@ class RuleParams:
             "template": self.template.value,
             "axis": self.axis,
             "leaf_idx": self.leaf_idx,
-            "leaf_indices": self.leaf_indices,
+            "leaf_indices": [int(i) for i in self.leaf_indices] if self.leaf_indices else None,
             "direction": self.direction,
-            "directions": self.directions,
+            "directions": [int(d) for d in self.directions] if self.directions else None,
             "rot_axis": self.rot_axis,
         }
 
@@ -217,7 +217,7 @@ class CycleRule(PCRARRule):
         leaves = entity.get_leaves()
         leaf_count = len(leaves)
         k = int(rng.integers(1, leaf_count + 1))
-        leaf_indices = list(rng.choice(leaf_count, size=k, replace=False))
+        leaf_indices = [int(i) for i in rng.choice(leaf_count, size=k, replace=False)]
         directions = [int(_choice_from_list(rng, [-1, 1])) for _ in range(k)]
         
         return RuleParams(
