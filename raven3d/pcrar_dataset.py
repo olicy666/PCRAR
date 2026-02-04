@@ -484,9 +484,9 @@ class PCRARDatasetGenerator:
             core = f"切换规则：CSG 操作 Union ↔ Diff 切换（op 索引 {leaf_idx}）。"
         elif rule.template == RuleTemplate.COUNT:
             if direction >= 0:
-                core = "增减规则：leaf 数量 +1（2→3）。"
+                core = "增减规则：leaf 数量按 1→2→3→1 正向循环。"
             else:
-                core = "增减规则：leaf 数量 -1（3→2）。"
+                core = "增减规则：leaf 数量按 1→3→2→1 反向循环。"
         elif rule.template == RuleTemplate.CONSERVATION:
             core = f"守恒规则：leaf{leaf_idx} 尺寸 +1，leaf{direction} 尺寸 -1（一增一减）。"
         elif rule.template == RuleTemplate.PERMUTATION:

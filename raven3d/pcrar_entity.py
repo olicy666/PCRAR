@@ -26,6 +26,10 @@ DEFAULT_BOUNDARY_SAMPLES = 8
 DEFAULT_MAX_ITERATIONS = 20
 
 # 密度离散档
+DENSITY_PRESETS_1 = [
+    [1.0],
+]
+
 DENSITY_PRESETS_2 = [
     [0.5, 0.5],
     [0.8, 0.2],
@@ -229,7 +233,9 @@ class PCRAREntity:
             weights = np.array(self.obs.part_sampling_weights)
         else:
             # 使用预设密度档
-            if n_leaves == 2:
+            if n_leaves == 1:
+                presets = DENSITY_PRESETS_1
+            elif n_leaves == 2:
                 presets = DENSITY_PRESETS_2
             else:
                 presets = DENSITY_PRESETS_3
@@ -316,7 +322,7 @@ def sample_random_entity(
     
     Args:
         rng: 随机数生成器
-        leaf_count: 叶节点数量（2 或 3）
+        leaf_count: 叶节点数量（1/2/3）
         allowed_ops: 允许的操作类型
         
     Returns:
@@ -330,7 +336,9 @@ def sample_random_entity(
     global_pose_deg = tuple(int(rng.choice(DISCRETE_ANGLES)) for _ in range(3))
     
     # 随机密度档位
-    if leaf_count == 2:
+    if leaf_count == 1:
+        density_preset_idx = int(rng.integers(len(DENSITY_PRESETS_1)))
+    elif leaf_count == 2:
         density_preset_idx = int(rng.integers(len(DENSITY_PRESETS_2)))
     else:
         density_preset_idx = int(rng.integers(len(DENSITY_PRESETS_3)))

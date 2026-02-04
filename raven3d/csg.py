@@ -422,7 +422,7 @@ def sample_random_csg(
     
     Args:
         rng: 随机数生成器
-        leaf_count: 叶节点数量（2 或 3）
+        leaf_count: 叶节点数量（1/2/3）
         allowed_ops: 允许的操作类型
         
     Returns:
@@ -431,7 +431,7 @@ def sample_random_csg(
     if allowed_ops is None:
         allowed_ops = [OpType.UNION, OpType.DIFF]
     
-    leaf_count = max(2, min(3, leaf_count))
+    leaf_count = max(1, min(3, leaf_count))
     
     # 随机选择 primitive 类型
     prim_types = [_choice_enum(rng, PRIM_TYPE_CYCLE) for _ in range(leaf_count)]
@@ -444,7 +444,9 @@ def sample_random_csg(
     leaves = []
     for i, prim_type in enumerate(prim_types):
         # 为不同的 leaf 分配不同的 slot
-        if leaf_count == 2:
+        if leaf_count == 1:
+            slot = 0
+        elif leaf_count == 2:
             slot = slots[i] if i < 2 else 0
         else:
             slot = slots[i] if i < 3 else 0
@@ -460,6 +462,8 @@ def sample_random_csg(
         leaves.append(leaf)
     
     # 构建二叉树
+    if leaf_count == 1:
+        return leaves[0]
     if leaf_count == 2:
         op = _choice_enum(rng, allowed_ops)
         return OpNode(op=op, left=leaves[0], right=leaves[1])

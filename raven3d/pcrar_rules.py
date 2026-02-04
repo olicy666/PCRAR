@@ -131,6 +131,8 @@ class ProgressionRule(PCRARRule):
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
         """检查是否可以应用（避免越界）"""
         leaves = entity.get_leaves()
+        if len(leaves) == 1:
+            return False
         direction = params.direction
         
         if params.axis == "r":
@@ -255,6 +257,11 @@ class CycleRule(PCRARRule):
         
         return new_entity
     
+    def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
+        if entity.leaf_count() == 1:
+            return False
+        return True
+    
     def check(self, entity_a: PCRAREntity, entity_b: PCRAREntity, params: RuleParams) -> bool:
         expected = self.apply(entity_a, params)
         return _compare_entities(expected, entity_b)
@@ -281,6 +288,8 @@ class ToggleRule(PCRARRule):
     
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
         # 需要有可切换的操作节点（Union / Diff）
+        if entity.leaf_count() == 1:
+            return False
         ops = [op for op in get_all_ops(entity.csg) if op.op in (OpType.UNION, OpType.DIFF)]
         return len(ops) > 0
     
@@ -312,15 +321,15 @@ class ToggleRule(PCRARRule):
 class CountRule(PCRARRule):
     """Rule4 Count（增减）
     
-    leaf_count: 2→3 或 3→2
+    leaf_count: 1→2→3→1（或反向循环）
     """
     template = RuleTemplate.COUNT
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.COUNT]
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
         leaf_count = entity.leaf_count()
-        # 2→3 增加，3→2 减少
-        direction = 1 if leaf_count == 2 else -1
+        # 正/反向循环
+        direction = int(_choice_from_list(rng, [-1, 1]))
         
         return RuleParams(
             template=self.template,
@@ -331,81 +340,59 @@ class CountRule(PCRARRule):
     
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
         leaf_count = entity.leaf_count()
-        if params.direction == 1 and leaf_count >= 3:
-            return False
-        if params.direction == -1 and leaf_count <= 2:
-            return False
-        return True
+        return leaf_count in (1, 2, 3)
     
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:
         new_entity = entity.copy()
-        
+        leaf_count = new_entity.leaf_count()
         if params.direction == 1:
-            # 增加一个叶节点（2→3）
-            new_entity = self._add_leaf(new_entity)
+            target_count = 1 if leaf_count == 3 else leaf_count + 1
         else:
-            # 减少一个叶节点（3→2）
-            new_entity = self._remove_leaf(new_entity)
-        
-        return new_entity
+            target_count = 3 if leaf_count == 1 else leaf_count - 1
+        return self._rebuild_with_leaf_count(new_entity, target_count)
     
-    def _add_leaf(self, entity: PCRAREntity) -> PCRAREntity:
-        """添加一个叶节点"""
-        leaves = entity.get_leaves()
-        new_id = max(leaf.id for leaf in leaves) + 1
-        
-        # 创建新叶节点
-        new_leaf = Leaf(
-            id=new_id,
-            prim_type=leaves[0].prim_type,  # 继承第一个 leaf 的类型
-            size_level=SizeLevel.M,
-            local_pose_deg=(0, 0, 0),
-            slot=0,  # 放在中间位置
-            delta_level=DeltaLevel.MID,
-        )
-        
-        # 重建 CSG 树：将新叶节点添加到树中
-        old_csg = entity.csg
-        new_csg = OpNode(
-            op=OpType.UNION,
-            left=copy_csg(old_csg),
-            right=new_leaf,
-        )
-        
-        # 更新密度权重
-        from .pcrar_entity import DENSITY_PRESETS_3
-        new_obs = entity.obs.copy()
-        new_obs.density_preset_idx = 0  # 使用均匀分布
-        
-        return PCRAREntity(csg=new_csg, obs=new_obs)
-    
-    def _remove_leaf(self, entity: PCRAREntity) -> PCRAREntity:
-        """移除一个叶节点"""
-        # 简化处理：移除最后一个叶节点
-        # 这需要重建树结构
-        leaves = entity.get_leaves()
-        if len(leaves) <= 2:
+    def _rebuild_with_leaf_count(self, entity: PCRAREntity, target_count: int) -> PCRAREntity:
+        """按目标 leaf 数量重建 CSG（1/2/3）"""
+        leaves = [leaf.copy() for leaf in entity.get_leaves()]
+        if not leaves:
             return entity
         
-        # 使用前两个叶节点重建简单树
-        new_csg = OpNode(
-            op=OpType.UNION,
-            left=leaves[0].copy(),
-            right=leaves[1].copy(),
-        )
+        # 补足叶节点
+        next_id = max(leaf.id for leaf in leaves) + 1
+        while len(leaves) < target_count:
+            leaves.append(Leaf(
+                id=next_id,
+                prim_type=leaves[0].prim_type,
+                size_level=SizeLevel.M,
+                local_pose_deg=(0, 0, 0),
+                slot=0,
+                delta_level=DeltaLevel.MID,
+            ))
+            next_id += 1
         
-        # 更新密度权重
-        from .pcrar_entity import DENSITY_PRESETS_2
+        # 截断叶节点
+        leaves = leaves[:target_count]
+        
+        if target_count == 1:
+            new_csg = leaves[0]
+        elif target_count == 2:
+            new_csg = OpNode(op=OpType.UNION, left=leaves[0], right=leaves[1])
+        else:
+            inner = OpNode(op=OpType.UNION, left=leaves[0], right=leaves[1])
+            new_csg = OpNode(op=OpType.UNION, left=inner, right=leaves[2])
+        
         new_obs = entity.obs.copy()
         new_obs.density_preset_idx = 0
-        
         return PCRAREntity(csg=new_csg, obs=new_obs)
     
     def check(self, entity_a: PCRAREntity, entity_b: PCRAREntity, params: RuleParams) -> bool:
         # 检查叶节点数量变化
         count_a = entity_a.leaf_count()
         count_b = entity_b.leaf_count()
-        expected_count = count_a + params.direction
+        if params.direction == 1:
+            expected_count = 1 if count_a == 3 else count_a + 1
+        else:
+            expected_count = 3 if count_a == 1 else count_a - 1
         return count_b == expected_count
 
 
@@ -552,6 +539,8 @@ class SymmetryRule(PCRARRule):
         )
     
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
+        if entity.leaf_count() == 1:
+            return False
         leaves = entity.get_leaves()
         if len(leaves) < 2:
             return False
