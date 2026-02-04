@@ -481,7 +481,7 @@ class PCRARDatasetGenerator:
             else:
                 core = f"循环规则：leaf{leaf_idx} 形状按序循环（Sphere→Box→Cylinder→Cone），方向 {dir_sign}1。"
         elif rule.template == RuleTemplate.COPY:
-            core = "拷贝规则：随机 leaf 的尺寸/密度拷贝为另一 leaf（其它属性不变）。"
+            core = "拷贝规则：按左右顺序循环拷贝尺寸（正向/逆向），仅限 3 个 leaf。"
         elif rule.template == RuleTemplate.COUNT:
             if direction >= 0:
                 core = "增减规则：leaf 数量按 1→2→3→1 正向循环。"

@@ -296,7 +296,7 @@ class CycleRule(PCRARRule):
 class CopyRule(PCRARRule):
     """Rule3 Copy（拷贝）
     
-    仅改变尺寸与密度：随机选 1-2 个 leaf，将其尺寸/密度拷贝为另一 leaf。
+    仅改变尺寸：按左右顺序做循环拷贝（正向/逆向）。
     """
     template = RuleTemplate.COPY
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.COPY]
@@ -305,36 +305,24 @@ class CopyRule(PCRARRule):
         leaf_count = entity.leaf_count()
         if leaf_count <= 1:
             return RuleParams(template=self.template)
-        
-        def build_params() -> RuleParams:
-            if leaf_count == 2:
-                target = int(rng.integers(2))
-                targets = [target]
-                sources = [1 - target]
-            else:
-                k = int(rng.integers(1, 3))  # 1 or 2
-                targets = [int(i) for i in rng.choice(leaf_count, size=k, replace=False)]
-                sources = []
-                for t in targets:
-                    candidates = [i for i in range(leaf_count) if i != t]
-                    sources.append(int(rng.choice(candidates)))
-            return RuleParams(
-                template=self.template,
-                axis="copy_size_density",
-                leaf_indices=targets,
-                source_indices=sources,
-            )
-        
-        params = build_params()
+        direction = int(_choice_from_list(rng, [-1, 1]))
+        params = RuleParams(
+            template=self.template,
+            axis="copy_size_cycle",
+            direction=direction,
+        )
         for _ in range(20):
             candidate = self.apply(entity, params)
             if not has_containment_risk(candidate.get_leaves()):
                 return params
-            params = build_params()
         return params
     
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
-        return entity.leaf_count() >= 2
+        if entity.leaf_count() != 3:
+            return False
+        sizes = [leaf.size_level for leaf in entity.get_leaves()]
+        # 三者尺寸必须全不同，否则循环拷贝无效
+        return len(set(sizes)) == 3
     
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:
         new_entity = entity.copy()
@@ -342,38 +330,22 @@ class CopyRule(PCRARRule):
         leaf_count = len(leaves)
         if leaf_count < 2:
             return new_entity
-        
-        targets = params.leaf_indices or ([params.leaf_idx] if params.leaf_idx is not None else [])
-        sources = params.source_indices or []
-        if not targets:
-            return new_entity
-        
-        weights = _get_density_weights(new_entity, leaf_count)
-        new_weights = weights.copy()
-        
-        if len(sources) != len(targets):
-            sources = []
-            for t in targets:
-                sources.append(0 if t != 0 else 1)
-        
-        for i, (t_idx, s_idx) in enumerate(zip(targets, sources)):
-            if t_idx < 0 or t_idx >= leaf_count:
-                continue
-            if s_idx < 0 or s_idx >= leaf_count:
-                continue
-            
-            # 尺寸拷贝
-            leaves[t_idx].size_level = leaves[s_idx].size_level
-            # 密度拷贝
-            new_weights[t_idx] = weights[s_idx]
-        
-        # 归一化密度权重
-        if new_weights.sum() <= 0:
-            new_weights = np.ones(leaf_count, dtype=float) / leaf_count
+
+        # 按 slot 从左到右排序（slot 相同按 id）
+        order = list(range(leaf_count))
+        order.sort(key=lambda i: (leaves[i].slot, leaves[i].id))
+
+        # 正向：每个叶子拷贝右侧邻居的尺寸（最右拷贝最左）
+        # 逆向：每个叶子拷贝左侧邻居的尺寸（最左拷贝最右）
+        sizes = [leaves[i].size_level for i in order]
+        if params.direction == 1:
+            sources = sizes[1:] + sizes[:1]
         else:
-            new_weights = new_weights / new_weights.sum()
-        
-        new_entity.obs.part_sampling_weights = [float(w) for w in new_weights]
+            sources = sizes[-1:] + sizes[:-1]
+
+        for idx, src_size in zip(order, sources):
+            leaves[idx].size_level = src_size
+
         return new_entity
     
     def check(self, entity_a: PCRAREntity, entity_b: PCRAREntity, params: RuleParams) -> bool:
