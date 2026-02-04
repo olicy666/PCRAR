@@ -58,6 +58,52 @@ class PCRARDatasetGenerator:
         self.rng = np.random.default_rng(seed)
         if seed is not None:
             np.random.seed(seed)
+        self._progression_axis_counts = {"r": 0, "R": 0, "p": 0, "d": 0}
+
+    def _choose_progression_params(
+        self,
+        entity: PCRAREntity,
+        preferred_axis: Optional[str] = None,
+    ) -> RuleParams:
+        """选择 Progression 轴，尽量均衡 4 种属性"""
+        rule = get_rule(RuleTemplate.PROGRESSION)
+        if preferred_axis:
+            direction = int(self.rng.choice([-1, 1]))
+            rot_axis = (
+                str(self.rng.choice(["x", "y", "z"]))
+                if preferred_axis == "R"
+                else None
+            )
+            params = RuleParams(
+                template=RuleTemplate.PROGRESSION,
+                axis=preferred_axis,
+                leaf_idx=None,
+                direction=direction,
+                rot_axis=rot_axis,
+            )
+            if rule.can_apply(entity, params):
+                return params
+            raise RuntimeError("Preferred axis not applicable.")
+
+        axes = ["r", "R", "p", "d"]
+        axes.sort(key=lambda a: self._progression_axis_counts.get(a, 0))
+        min_count = self._progression_axis_counts.get(axes[0], 0)
+        candidate_axes = [a for a in axes if self._progression_axis_counts.get(a, 0) == min_count]
+        self.rng.shuffle(candidate_axes)
+        for axis in candidate_axes + [a for a in axes if a not in candidate_axes]:
+            for _ in range(8):
+                direction = int(self.rng.choice([-1, 1]))
+                rot_axis = str(self.rng.choice(["x", "y", "z"])) if axis == "R" else None
+                params = RuleParams(
+                    template=RuleTemplate.PROGRESSION,
+                    axis=axis,
+                    leaf_idx=None,
+                    direction=direction,
+                    rot_axis=rot_axis,
+                )
+                if rule.can_apply(entity, params):
+                    return params
+        raise RuntimeError("No applicable Progression axis for current entity.")
     
     def generate_sample(
         self,
@@ -304,20 +350,8 @@ class PCRARDatasetGenerator:
             for template in templates:
                 rule = get_rule(template)
                 for _ in range(20):
-                    if preferred_axis and template == RuleTemplate.PROGRESSION:
-                        direction = int(self.rng.choice([-1, 1]))
-                        rot_axis = (
-                            str(self.rng.choice(["x", "y", "z"]))
-                            if preferred_axis == "R"
-                            else None
-                        )
-                        params = RuleParams(
-                            template=RuleTemplate.PROGRESSION,
-                            axis=preferred_axis,
-                            leaf_idx=None,
-                            direction=direction,
-                            rot_axis=rot_axis,
-                        )
+                    if template == RuleTemplate.PROGRESSION:
+                        params = self._choose_progression_params(entity, preferred_axis=preferred_axis)
                     elif preferred_axis and template == RuleTemplate.COPY:
                         direction = int(self.rng.choice([-1, 1]))
                         params = RuleParams(
@@ -328,9 +362,34 @@ class PCRARDatasetGenerator:
                     else:
                         params = rule.sample_params(self.rng, entity)
                     if rule.can_apply(entity, params):
+                        if template == RuleTemplate.PROGRESSION and params.axis:
+                            self._progression_axis_counts[params.axis] = (
+                                self._progression_axis_counts.get(params.axis, 0) + 1
+                            )
                         return rule, params
             raise RuntimeError("No applicable rules for current rule_filter.")
         
+        # 无过滤时：优先均衡 Progression 轴
+        templates = list(RuleTemplate)
+        self.rng.shuffle(templates)
+        for template in templates:
+            rule = get_rule(template)
+            for _ in range(20):
+                if template == RuleTemplate.PROGRESSION:
+                    try:
+                        params = self._choose_progression_params(entity, preferred_axis=preferred_axis)
+                    except RuntimeError:
+                        continue
+                else:
+                    params = rule.sample_params(self.rng, entity)
+                if rule.can_apply(entity, params):
+                    if template == RuleTemplate.PROGRESSION and params.axis:
+                        self._progression_axis_counts[params.axis] = (
+                            self._progression_axis_counts.get(params.axis, 0) + 1
+                        )
+                    return rule, params
+
+        # 回退到原逻辑
         return sample_applicable_rule(self.rng, entity)
     
     def _generate_compatible_entity(
