@@ -546,17 +546,35 @@ class PCRARDatasetGenerator:
             self.rng.shuffle(axis_plan)
 
         all_entries = []
+        retryable_errors = {
+            "Failed to generate unique distractors.",
+            "Failed to sample a relational rule that can be applied twice.",
+            "Failed to sample an analogical rule for the given config.",
+        }
+        max_sample_attempts = 20
         for idx in range(num_samples):
             correct_idx = int(correct_indices[idx])
             task_type = task_types[idx]
             preferred_axis = axis_plan[idx] if axis_plan else None
-            entry = self.generate_sample(
-                output_root,
-                idx,
-                task_type=task_type,
-                correct_idx=correct_idx,
-                preferred_axis=preferred_axis,
-            )
+            last_err: Optional[RuntimeError] = None
+            for _ in range(max_sample_attempts):
+                try:
+                    entry = self.generate_sample(
+                        output_root,
+                        idx,
+                        task_type=task_type,
+                        correct_idx=correct_idx,
+                        preferred_axis=preferred_axis,
+                    )
+                    break
+                except RuntimeError as exc:
+                    if str(exc) not in retryable_errors:
+                        raise
+                    last_err = exc
+            else:
+                raise RuntimeError(
+                    f"Failed to generate sample {idx} after {max_sample_attempts} attempts: {last_err}"
+                )
             all_entries.append(entry)
         
         # 保存汇总元数据
