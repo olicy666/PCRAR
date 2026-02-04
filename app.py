@@ -27,7 +27,7 @@ POINTS_PER_CLOUD = 8192
 RULE_NAMES = {
     RuleTemplate.PROGRESSION: "递进规则",
     RuleTemplate.CYCLE: "循环规则",
-    RuleTemplate.TOGGLE: "切换规则",
+    RuleTemplate.COPY: "拷贝规则",
     RuleTemplate.COUNT: "增减规则",
     RuleTemplate.CONSERVATION: "守恒规则",
     RuleTemplate.PERMUTATION: "置换规则",
@@ -789,7 +789,7 @@ def render_exam() -> None:
         rule_desc = {
             "递进规则 (Progression)": "属性沿固定步长变化：尺寸/姿态/位置/密度的递进",
             "循环规则 (Cycle)": "形状离散循环：球体→立方体→圆柱→圆锥→...",
-            "切换规则 (Toggle)": "布尔操作切换：Union ↔ Diff",
+            "拷贝规则 (Copy)": "尺寸/密度拷贝：随机 leaf 的尺寸/密度复制到另一个 leaf",
             "增减规则 (Count)": "叶节点数量变化：2↔3",
             "守恒规则 (Conservation)": "尺寸守恒：一增一减，总和不变",
             "置换规则 (Permutation)": "位置槽位循环置换",

@@ -480,8 +480,8 @@ class PCRARDatasetGenerator:
                 core = f"循环规则：{leaf_part} 形状按序循环（Sphere→Box→Cylinder→Cone）。"
             else:
                 core = f"循环规则：leaf{leaf_idx} 形状按序循环（Sphere→Box→Cylinder→Cone），方向 {dir_sign}1。"
-        elif rule.template == RuleTemplate.TOGGLE:
-            core = f"切换规则：CSG 操作 Union ↔ Diff 切换（op 索引 {leaf_idx}）。"
+        elif rule.template == RuleTemplate.COPY:
+            core = "拷贝规则：随机 leaf 的尺寸/密度拷贝为另一 leaf（其它属性不变）。"
         elif rule.template == RuleTemplate.COUNT:
             if direction >= 0:
                 core = "增减规则：leaf 数量按 1→2→3→1 正向循环。"

@@ -413,7 +413,7 @@ def _choice_enum(rng: np.random.Generator, enum_list: List) -> Any:
     return enum_list[idx]
 
 
-def _has_containment_risk(leaves: List["Leaf"], margin: float = 0.05) -> bool:
+def has_containment_risk(leaves: List["Leaf"], margin: float = 0.05) -> bool:
     """粗略判断 leaf 是否可能完全包含（仅基于中心距离与尺度）"""
     for i in range(len(leaves)):
         for j in range(i + 1, len(leaves)):
@@ -437,14 +437,14 @@ def enforce_leaf_separation(leaves: List["Leaf"]) -> None:
         if leaf.delta_level == DeltaLevel.NEAR:
             leaf.delta_level = DeltaLevel.MID
 
-    if not _has_containment_risk(leaves):
+    if not has_containment_risk(leaves):
         return
 
     # 提升位移档位，拉开中心距
     for leaf in leaves:
         leaf.delta_level = DeltaLevel.FAR
 
-    if not _has_containment_risk(leaves):
+    if not has_containment_risk(leaves):
         return
 
     # 仍有风险时，强制拉开 slot

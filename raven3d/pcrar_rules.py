@@ -1,6 +1,6 @@
 """PCRAR 规则模块.
 
-实现 7 条规则：Progression, Cycle, Toggle, Count, Conservation, Permutation, Symmetry
+实现 7 条规则：Progression, Cycle, Copy, Count, Conservation, Permutation, Symmetry
 """
 from __future__ import annotations
 
@@ -15,9 +15,12 @@ from .csg import (
     CSGNode, Leaf, OpNode, OpType, PrimType, SizeLevel, DeltaLevel,
     PRIM_TYPE_CYCLE, DISCRETE_ANGLES, SIZE_LEVEL_MAP, DELTA_LEVEL_MAP,
     get_all_leaves, get_all_ops, copy_csg, sample_random_csg,
-    enforce_leaf_separation,
+    enforce_leaf_separation, has_containment_risk,
 )
-from .pcrar_entity import PCRAREntity, ObservationConfig, sample_random_entity
+from .pcrar_entity import (
+    PCRAREntity, ObservationConfig, sample_random_entity,
+    DENSITY_PRESETS_1, DENSITY_PRESETS_2, DENSITY_PRESETS_3,
+)
 
 
 # 尺寸档位列表（用于 Progression）
@@ -32,7 +35,7 @@ class RuleTemplate(str, Enum):
     """规则模板枚举"""
     PROGRESSION = "Progression"
     CYCLE = "Cycle"
-    TOGGLE = "Toggle"
+    COPY = "Copy"
     COUNT = "Count"
     CONSERVATION = "Conservation"
     PERMUTATION = "Permutation"
@@ -43,7 +46,7 @@ class RuleTemplate(str, Enum):
 RULE_SOURCE_ALIGN: Dict[RuleTemplate, List[str]] = {
     RuleTemplate.PROGRESSION: ["R1-1", "R1-2", "R1-3", "R1-4", "R1-5"],
     RuleTemplate.CYCLE: ["R1-6", "R3-10"],
-    RuleTemplate.TOGGLE: ["R3"],
+    RuleTemplate.COPY: ["R3"],
     RuleTemplate.COUNT: ["R1-11", "R3-4", "R3-5", "R4-3"],
     RuleTemplate.CONSERVATION: ["R2-2"],
     RuleTemplate.PERMUTATION: ["R3-2", "R3-7"],
@@ -61,6 +64,7 @@ class RuleParams:
     direction: int = 1  # 方向: +1/-1
     directions: Optional[List[int]] = None  # 每个 leaf 的方向（用于多对象）
     rot_axis: Optional[str] = None  # 旋转轴: x/y/z（仅 Progression + R 使用）
+    source_indices: Optional[List[int]] = None  # 拷贝规则的来源 leaf 索引
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -71,6 +75,7 @@ class RuleParams:
             "direction": self.direction,
             "directions": [int(d) for d in self.directions] if self.directions else None,
             "rot_axis": self.rot_axis,
+            "source_indices": [int(i) for i in self.source_indices] if self.source_indices else None,
         }
 
 
@@ -103,6 +108,26 @@ def _choice_from_list(rng: np.random.Generator, lst: list):
     """从列表中随机选择元素"""
     idx = int(rng.integers(len(lst)))
     return lst[idx]
+
+
+def _get_density_weights(entity: PCRAREntity, n_leaves: int) -> np.ndarray:
+    """获取当前实体的密度权重（与采样逻辑一致）"""
+    if entity.obs.part_sampling_weights and len(entity.obs.part_sampling_weights) == n_leaves:
+        weights = np.array(entity.obs.part_sampling_weights, dtype=float)
+    else:
+        if n_leaves == 1:
+            presets = DENSITY_PRESETS_1
+        elif n_leaves == 2:
+            presets = DENSITY_PRESETS_2
+        else:
+            presets = DENSITY_PRESETS_3
+        idx = entity.obs.density_preset_idx % len(presets)
+        weights = np.array(presets[idx], dtype=float)
+        if len(weights) != n_leaves:
+            weights = np.ones(n_leaves, dtype=float) / n_leaves
+    if weights.sum() <= 0:
+        weights = np.ones(n_leaves, dtype=float) / n_leaves
+    return weights / weights.sum()
 
 
 class ProgressionRule(PCRARRule):
@@ -268,50 +293,87 @@ class CycleRule(PCRARRule):
         return _compare_entities(expected, entity_b)
 
 
-class ToggleRule(PCRARRule):
-    """Rule3 Toggle（切换）
+class CopyRule(PCRARRule):
+    """Rule3 Copy（拷贝）
     
-    保持 leaf 不变，只切换某个内部节点的 op：Union ↔ Diff
+    仅改变尺寸与密度：随机选 1-2 个 leaf，将其尺寸/密度拷贝为另一 leaf。
     """
-    template = RuleTemplate.TOGGLE
-    source_align = RULE_SOURCE_ALIGN[RuleTemplate.TOGGLE]
+    template = RuleTemplate.COPY
+    source_align = RULE_SOURCE_ALIGN[RuleTemplate.COPY]
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
-        # 找到所有可切换的操作节点（Union / Diff）
-        ops = [op for op in get_all_ops(entity.csg) if op.op in (OpType.UNION, OpType.DIFF)]
-        op_idx = int(rng.integers(len(ops))) if ops else 0
-        return RuleParams(
-            template=self.template,
-            axis="op",
-            leaf_idx=op_idx,
-            direction=1,
-        )
+        leaf_count = entity.leaf_count()
+        if leaf_count <= 1:
+            return RuleParams(template=self.template)
+        
+        def build_params() -> RuleParams:
+            if leaf_count == 2:
+                target = int(rng.integers(2))
+                targets = [target]
+                sources = [1 - target]
+            else:
+                k = int(rng.integers(1, 3))  # 1 or 2
+                targets = [int(i) for i in rng.choice(leaf_count, size=k, replace=False)]
+                sources = []
+                for t in targets:
+                    candidates = [i for i in range(leaf_count) if i != t]
+                    sources.append(int(rng.choice(candidates)))
+            return RuleParams(
+                template=self.template,
+                axis="copy_size_density",
+                leaf_indices=targets,
+                source_indices=sources,
+            )
+        
+        params = build_params()
+        for _ in range(20):
+            candidate = self.apply(entity, params)
+            if not has_containment_risk(candidate.get_leaves()):
+                return params
+            params = build_params()
+        return params
     
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
-        # 需要有可切换的操作节点（Union / Diff）
-        if entity.leaf_count() == 1:
-            return False
-        ops = [op for op in get_all_ops(entity.csg) if op.op in (OpType.UNION, OpType.DIFF)]
-        return len(ops) > 0
+        return entity.leaf_count() >= 2
     
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:
         new_entity = entity.copy()
-        
-        # 找到并切换可切换操作节点
-        ops = [op for op in get_all_ops(new_entity.csg) if op.op in (OpType.UNION, OpType.DIFF)]
-        if not ops:
+        leaves = new_entity.get_leaves()
+        leaf_count = len(leaves)
+        if leaf_count < 2:
             return new_entity
         
-        op_idx = params.leaf_idx % len(ops)
-        op_node = ops[op_idx]
+        targets = params.leaf_indices or ([params.leaf_idx] if params.leaf_idx is not None else [])
+        sources = params.source_indices or []
+        if not targets:
+            return new_entity
         
-        # Union ↔ Diff 切换
-        if op_node.op == OpType.UNION:
-            op_node.op = OpType.DIFF
-        elif op_node.op == OpType.DIFF:
-            op_node.op = OpType.UNION
-        # Intersect 保持不变
+        weights = _get_density_weights(new_entity, leaf_count)
+        new_weights = weights.copy()
         
+        if len(sources) != len(targets):
+            sources = []
+            for t in targets:
+                sources.append(0 if t != 0 else 1)
+        
+        for i, (t_idx, s_idx) in enumerate(zip(targets, sources)):
+            if t_idx < 0 or t_idx >= leaf_count:
+                continue
+            if s_idx < 0 or s_idx >= leaf_count:
+                continue
+            
+            # 尺寸拷贝
+            leaves[t_idx].size_level = leaves[s_idx].size_level
+            # 密度拷贝
+            new_weights[t_idx] = weights[s_idx]
+        
+        # 归一化密度权重
+        if new_weights.sum() <= 0:
+            new_weights = np.ones(leaf_count, dtype=float) / leaf_count
+        else:
+            new_weights = new_weights / new_weights.sum()
+        
+        new_entity.obs.part_sampling_weights = [float(w) for w in new_weights]
         return new_entity
     
     def check(self, entity_a: PCRAREntity, entity_b: PCRAREntity, params: RuleParams) -> bool:
@@ -611,7 +673,7 @@ def _compare_entities(e1: PCRAREntity, e2: PCRAREntity) -> bool:
 PCRAR_RULES: Dict[RuleTemplate, Type[PCRARRule]] = {
     RuleTemplate.PROGRESSION: ProgressionRule,
     RuleTemplate.CYCLE: CycleRule,
-    RuleTemplate.TOGGLE: ToggleRule,
+    RuleTemplate.COPY: CopyRule,
     RuleTemplate.COUNT: CountRule,
     RuleTemplate.CONSERVATION: ConservationRule,
     RuleTemplate.PERMUTATION: PermutationRule,

@@ -55,7 +55,7 @@ Attr(E) = (CSG, O)
 |------|------|----------|
 | Progression | 属性沿固定步长递进 | R1-1, R1-2, R1-3, R1-4, R1-5 |
 | Cycle | 形状离散循环 | R1-6, R3-10 |
-| Toggle | 布尔操作切换 Union↔Diff | R3 |
+| Copy | 尺寸/密度拷贝 | R3 |
 | Count | 叶节点数量增减 2↔3 | R1-11, R3-4, R3-5, R4-3 |
 | Conservation | 尺寸守恒（一增一减） | R2-2 |
 | Permutation | 槽位循环置换 | R3-2, R3-7 |
@@ -71,7 +71,7 @@ python main.py --mode pcrar \
     --task-mix 0.5 \
     --leaf-count-min 2 \
     --leaf-count-max 3 \
-    --pcrar-rules Progression,Cycle,Toggle \
+    --pcrar-rules Progression,Cycle,Copy \
     --seed 0
 ```
 

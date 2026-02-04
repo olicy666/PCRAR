@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
         "--pcrar-rules",
         type=str,
         default=None,
-        help="PCRAR: Comma-separated rule templates (e.g., Progression,Cycle,Toggle). When provided, filters rules.",
+        help="PCRAR: Comma-separated rule templates (e.g., Progression,Cycle,Copy). When provided, filters rules.",
     )
     return parser.parse_args()
 
