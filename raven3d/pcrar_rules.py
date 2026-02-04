@@ -56,7 +56,9 @@ class RuleParams:
     template: RuleTemplate
     axis: Optional[str] = None  # 作用轴: r(size), R(pose), p(position), d(density)
     leaf_idx: Optional[int] = None  # 目标叶节点索引
+    leaf_indices: Optional[List[int]] = None  # 目标叶节点索引列表（用于多对象）
     direction: int = 1  # 方向: +1/-1
+    directions: Optional[List[int]] = None  # 每个 leaf 的方向（用于多对象）
     rot_axis: Optional[str] = None  # 旋转轴: x/y/z（仅 Progression + R 使用）
     
     def to_dict(self) -> Dict[str, Any]:
@@ -64,7 +66,9 @@ class RuleParams:
             "template": self.template.value,
             "axis": self.axis,
             "leaf_idx": self.leaf_idx,
+            "leaf_indices": self.leaf_indices,
             "direction": self.direction,
+            "directions": self.directions,
             "rot_axis": self.rot_axis,
         }
 
@@ -211,25 +215,43 @@ class CycleRule(PCRARRule):
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
         leaves = entity.get_leaves()
-        leaf_idx = int(rng.integers(len(leaves)))
-        direction = _choice_from_list(rng, [-1, 1])
+        leaf_count = len(leaves)
+        k = int(rng.integers(1, leaf_count + 1))
+        leaf_indices = list(rng.choice(leaf_count, size=k, replace=False))
+        directions = [int(_choice_from_list(rng, [-1, 1])) for _ in range(k)]
         
         return RuleParams(
             template=self.template,
             axis="shape",
-            leaf_idx=leaf_idx,
-            direction=direction,
+            leaf_idx=leaf_indices[0] if leaf_indices else None,
+            leaf_indices=leaf_indices,
+            direction=directions[0] if directions else 1,
+            directions=directions,
         )
     
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:
         new_entity = entity.copy()
         leaves = new_entity.get_leaves()
-        leaf = leaves[params.leaf_idx]
-        
-        # 形状循环
-        idx = PRIM_TYPE_CYCLE.index(leaf.prim_type)
-        new_idx = (idx + params.direction) % len(PRIM_TYPE_CYCLE)
-        leaf.prim_type = PRIM_TYPE_CYCLE[new_idx]
+        if params.leaf_indices:
+            for i, leaf_idx in enumerate(params.leaf_indices):
+                if leaf_idx < 0 or leaf_idx >= len(leaves):
+                    continue
+                leaf = leaves[leaf_idx]
+                direction = params.direction
+                if params.directions and i < len(params.directions):
+                    direction = params.directions[i]
+                
+                # 形状循环
+                idx = PRIM_TYPE_CYCLE.index(leaf.prim_type)
+                new_idx = (idx + direction) % len(PRIM_TYPE_CYCLE)
+                leaf.prim_type = PRIM_TYPE_CYCLE[new_idx]
+        elif params.leaf_idx is not None:
+            leaf = leaves[params.leaf_idx]
+            
+            # 形状循环
+            idx = PRIM_TYPE_CYCLE.index(leaf.prim_type)
+            new_idx = (idx + params.direction) % len(PRIM_TYPE_CYCLE)
+            leaf.prim_type = PRIM_TYPE_CYCLE[new_idx]
         
         return new_entity
     
@@ -674,11 +696,16 @@ def generate_distractor(
     
     if method == "different_direction":
         # 使用相反的方向
+        new_directions = None
+        if params.directions:
+            new_directions = [-d for d in params.directions]
         new_params = RuleParams(
             template=params.template,
             axis=params.axis,
             leaf_idx=params.leaf_idx,
             direction=-params.direction,
+            leaf_indices=params.leaf_indices,
+            directions=new_directions,
         )
         if rule.can_apply(distractor, new_params):
             distractor = rule.apply(distractor, new_params)
@@ -688,18 +715,37 @@ def generate_distractor(
     if method == "different_leaf":
         # 应用到不同的叶节点
         leaves = entity.get_leaves()
-        if len(leaves) > 1 and params.leaf_idx is not None:
-            other_idx = (params.leaf_idx + 1) % len(leaves)
-            new_params = RuleParams(
-                template=params.template,
-                axis=params.axis,
-                leaf_idx=other_idx,
-                direction=params.direction,
-            )
-            if rule.can_apply(distractor, new_params):
-                distractor = rule.apply(distractor, new_params)
-                reason = f"应用到了错误的对象（leaf {other_idx} 而非 {params.leaf_idx}）"
-                return distractor, reason
+        if len(leaves) > 1:
+            if params.leaf_indices:
+                candidates = [i for i in range(len(leaves)) if i not in params.leaf_indices]
+                if candidates:
+                    other_idx = _choice_from_list(rng, candidates)
+                    new_leaf_indices = list(params.leaf_indices)
+                    new_leaf_indices[0] = other_idx
+                    new_params = RuleParams(
+                        template=params.template,
+                        axis=params.axis,
+                        leaf_idx=other_idx,
+                        leaf_indices=new_leaf_indices,
+                        direction=params.direction,
+                        directions=params.directions,
+                    )
+                    if rule.can_apply(distractor, new_params):
+                        distractor = rule.apply(distractor, new_params)
+                        reason = f"应用到了错误的对象（leaf {other_idx} 而非 {params.leaf_indices}）"
+                        return distractor, reason
+            elif params.leaf_idx is not None:
+                other_idx = (params.leaf_idx + 1) % len(leaves)
+                new_params = RuleParams(
+                    template=params.template,
+                    axis=params.axis,
+                    leaf_idx=other_idx,
+                    direction=params.direction,
+                )
+                if rule.can_apply(distractor, new_params):
+                    distractor = rule.apply(distractor, new_params)
+                    reason = f"应用到了错误的对象（leaf {other_idx} 而非 {params.leaf_idx}）"
+                    return distractor, reason
     
     # 回退：应用不同的规则
     other_templates = [t for t in RuleTemplate if t != params.template]

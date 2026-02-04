@@ -446,7 +446,9 @@ class PCRARDatasetGenerator:
         """生成考点描述"""
         axis = params.axis or ""
         leaf_idx = params.leaf_idx
+        leaf_indices = params.leaf_indices or ([leaf_idx] if leaf_idx is not None else [])
         direction = params.direction
+        directions = params.directions or ([direction] * len(leaf_indices) if leaf_indices else [])
         dir_sign = "+" if direction >= 0 else "-"
         dir_word = "增加" if direction >= 0 else "减少"
         shift_word = "右移" if direction >= 0 else "左移"
@@ -468,7 +470,16 @@ class PCRARDatasetGenerator:
             else:
                 core = "递进规则：沿同一属性做离散步进。"
         elif rule.template == RuleTemplate.CYCLE:
-            core = f"循环规则：leaf{leaf_idx} 形状按序循环（Sphere→Box→Cylinder→Cone），方向 {dir_sign}1。"
+            if leaf_indices:
+                parts = []
+                for i, idx in enumerate(leaf_indices):
+                    d = directions[i] if i < len(directions) else direction
+                    sign = "+" if d >= 0 else "-"
+                    parts.append(f"leaf{idx}({sign}1)")
+                leaf_part = "，".join(parts)
+                core = f"循环规则：{leaf_part} 形状按序循环（Sphere→Box→Cylinder→Cone）。"
+            else:
+                core = f"循环规则：leaf{leaf_idx} 形状按序循环（Sphere→Box→Cylinder→Cone），方向 {dir_sign}1。"
         elif rule.template == RuleTemplate.TOGGLE:
             core = f"切换规则：CSG 操作 Union ↔ Diff 切换（op 索引 {leaf_idx}）。"
         elif rule.template == RuleTemplate.COUNT:
