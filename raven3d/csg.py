@@ -448,6 +448,17 @@ def has_excessive_overlap(
     return False
 
 
+def has_duplicate_positions(leaves: List["Leaf"]) -> bool:
+    """判断是否存在完全重合的位置（slot + delta_level 相同）"""
+    seen = set()
+    for leaf in leaves:
+        key = (leaf.slot, leaf.delta_level)
+        if key in seen:
+            return True
+        seen.add(key)
+    return False
+
+
 def enforce_leaf_separation(leaves: List["Leaf"]) -> None:
     """调整 leaf 位置/位移档位，降低完全包含或过度重叠导致不可见的概率"""
     if len(leaves) < 2:
@@ -459,20 +470,25 @@ def enforce_leaf_separation(leaves: List["Leaf"]) -> None:
             leaf.delta_level = DeltaLevel.MID
 
     if not has_containment_risk(leaves) and not has_excessive_overlap(leaves):
-        return
+        if not has_duplicate_positions(leaves):
+            return
 
     # 提升位移档位，拉开中心距
     for leaf in leaves:
         leaf.delta_level = DeltaLevel.FAR
 
     if not has_containment_risk(leaves) and not has_excessive_overlap(leaves):
-        return
+        if not has_duplicate_positions(leaves):
+            return
 
     # 仍有风险时，强制拉开 slot（尽量让大尺寸占两端）
     if len(leaves) == 2:
         target_slots = [-1, 1]
         for leaf, slot in zip(leaves, target_slots):
             leaf.slot = slot
+        # 统一拉远，避免重合
+        for leaf in leaves:
+            leaf.delta_level = DeltaLevel.FAR
     else:
         # 3 个 leaf：按尺寸排序，把最大两个放在两端，最小的放中间
         indexed = list(enumerate(leaves))
@@ -480,6 +496,9 @@ def enforce_leaf_separation(leaves: List["Leaf"]) -> None:
         slot_order = [-1, 1, 0]
         for (idx, _leaf), slot in zip(indexed, slot_order):
             leaves[idx].slot = slot
+        # 统一拉远，避免重合
+        for leaf in leaves:
+            leaf.delta_level = DeltaLevel.FAR
 
 
 def sample_random_csg(
