@@ -793,7 +793,7 @@ def render_exam() -> None:
             "增减规则 (Count)": "叶节点数量变化：2↔3",
             "守恒规则 (Conservation)": "尺寸守恒：一增一减，总和不变",
             "置换规则 (Permutation)": "位置槽位循环置换",
-            "对称规则 (Symmetry)": "对称变换：左+Δ，右-Δ",
+            "对称规则 (Symmetry)": "对称变换：左+Δ，右-Δ（位置/姿态/尺寸/密度之一）",
         }
         for name, desc in rule_desc.items():
             st.markdown(f"- **{name}**: {desc}")

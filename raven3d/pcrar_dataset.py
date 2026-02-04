@@ -494,8 +494,14 @@ class PCRARDatasetGenerator:
         elif rule.template == RuleTemplate.SYMMETRY:
             if axis == "p":
                 core = f"对称规则：左右 leaf 位置对称变化（左 +1，右 -1）。"
-            else:
+            elif axis == "R":
                 core = f"对称规则：左右 leaf 姿态对称变化（左 +90°，右 -90°）。"
+            elif axis == "r":
+                core = "对称规则：左右 leaf 尺寸镜像变化（左 +1，右 -1）。"
+            elif axis == "d":
+                core = "对称规则：左右 leaf 密度镜像变化（左右密度对调）。"
+            else:
+                core = "对称规则：左右 leaf 做镜像变换。"
         else:
             core = "规则变换：按指定模板对实体属性做变换。"
 

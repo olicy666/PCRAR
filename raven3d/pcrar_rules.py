@@ -587,39 +587,58 @@ class SymmetryRule(PCRARRule):
     """Rule7 Symmetry（对称）
     
     选一对 leaf（左/右）作为对称对：
-    - A→B 左做 +Δ，则右做 -Δ（作用于 p 或 R）
-    - 第三个 leaf（若存在）可当锚点不动
+    - A→B 左做 +Δ，则右做 -Δ（作用于 p/R/r/d 之一）
+    - 第三个 leaf（若存在）作为锚点不动
     """
     template = RuleTemplate.SYMMETRY
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.SYMMETRY]
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
-        axis = _choice_from_list(rng, ["p", "R"])  # 位置或姿态
-        
+        axis = _choice_from_list(rng, ["p", "R", "r", "d"])  # 位置/姿态/尺寸/密度
+        left_idx, right_idx = self._pick_left_right(entity)
         return RuleParams(
             template=self.template,
             axis=axis,
-            leaf_idx=0,  # 左侧 leaf 索引
-            direction=1,  # 右侧 leaf 索引
+            leaf_idx=left_idx,  # 左侧 leaf 索引
+            direction=right_idx,  # 右侧 leaf 索引
         )
     
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
-        if entity.leaf_count() == 1:
-            return False
         leaves = entity.get_leaves()
         if len(leaves) < 2:
+            return False
+        left_idx, right_idx = params.leaf_idx, params.direction
+        if left_idx is None or right_idx is None:
+            return False
+        if left_idx >= len(leaves) or right_idx >= len(leaves):
             return False
         
         if params.axis == "p":
             # 检查位置是否可以对称变化
-            left = leaves[params.leaf_idx]
-            right = leaves[params.direction]
+            left = leaves[left_idx]
+            right = leaves[right_idx]
             left_slot_idx = SLOTS.index(left.slot)
             right_slot_idx = SLOTS.index(right.slot)
             # 左侧可以增，右侧可以减（或相反）
             return (left_slot_idx < len(SLOTS) - 1 and right_slot_idx > 0)
+        elif params.axis == "R":
+            # 检查姿态是否可旋转（避免球体）
+            left = leaves[left_idx]
+            right = leaves[right_idx]
+            if left.prim_type == PrimType.SPHERE or right.prim_type == PrimType.SPHERE:
+                return False
+            return True
+        elif params.axis == "r":
+            left = leaves[left_idx]
+            right = leaves[right_idx]
+            left_idx_size = SIZE_LEVELS.index(left.size_level)
+            right_idx_size = SIZE_LEVELS.index(right.size_level)
+            return left_idx_size < len(SIZE_LEVELS) - 1 and right_idx_size > 0
+        elif params.axis == "d":
+            weights = _get_density_weights(entity, len(leaves))
+            return weights[left_idx] != weights[right_idx]
         
-        return True
+        return False
     
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:
         new_entity = entity.copy()
@@ -627,9 +646,14 @@ class SymmetryRule(PCRARRule):
         
         if len(leaves) < 2:
             return new_entity
+        left_idx, right_idx = params.leaf_idx, params.direction
+        if left_idx is None or right_idx is None:
+            return new_entity
+        if left_idx >= len(leaves) or right_idx >= len(leaves):
+            return new_entity
         
-        left = leaves[params.leaf_idx]
-        right = leaves[params.direction]
+        left = leaves[left_idx]
+        right = leaves[right_idx]
         
         if params.axis == "p":
             # 位置对称变化
@@ -651,8 +675,32 @@ class SymmetryRule(PCRARRule):
             
             left.local_pose_deg = tuple(left_pose)
             right.local_pose_deg = tuple(right_pose)
+        elif params.axis == "r":
+            left_size = SIZE_LEVELS.index(left.size_level)
+            right_size = SIZE_LEVELS.index(right.size_level)
+            left.size_level = SIZE_LEVELS[min(len(SIZE_LEVELS) - 1, left_size + 1)]
+            right.size_level = SIZE_LEVELS[max(0, right_size - 1)]
+        elif params.axis == "d":
+            weights = _get_density_weights(new_entity, len(leaves))
+            weights = weights.copy()
+            weights[left_idx], weights[right_idx] = weights[right_idx], weights[left_idx]
+            if weights.sum() > 0:
+                weights = weights / weights.sum()
+            new_entity.obs.part_sampling_weights = [float(w) for w in weights]
         
         return new_entity
+
+    def _pick_left_right(self, entity: PCRAREntity) -> Tuple[int, int]:
+        leaves = entity.get_leaves()
+        if len(leaves) < 2:
+            return 0, 0
+        indexed = list(enumerate(leaves))
+        indexed.sort(key=lambda t: (t[1].slot, t[0]))
+        left_idx = indexed[0][0]
+        right_idx = indexed[-1][0]
+        if left_idx == right_idx:
+            right_idx = 1 if left_idx == 0 else 0
+        return left_idx, right_idx
     
     def check(self, entity_a: PCRAREntity, entity_b: PCRAREntity, params: RuleParams) -> bool:
         expected = self.apply(entity_a, params)
