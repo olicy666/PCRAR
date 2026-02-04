@@ -15,6 +15,7 @@ from .csg import (
     CSGNode, Leaf, OpNode, OpType, PrimType, SizeLevel, DeltaLevel,
     PRIM_TYPE_CYCLE, DISCRETE_ANGLES, SIZE_LEVEL_MAP, DELTA_LEVEL_MAP,
     get_all_leaves, get_all_ops, copy_csg, sample_random_csg,
+    enforce_leaf_separation,
 )
 from .pcrar_entity import PCRAREntity, ObservationConfig, sample_random_entity
 
@@ -372,7 +373,9 @@ class CountRule(PCRARRule):
         
         # 截断叶节点
         leaves = leaves[:target_count]
-        
+
+        enforce_leaf_separation(leaves)
+
         if target_count == 1:
             new_csg = leaves[0]
         elif target_count == 2:

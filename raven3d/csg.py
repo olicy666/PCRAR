@@ -413,6 +413,46 @@ def _choice_enum(rng: np.random.Generator, enum_list: List) -> Any:
     return enum_list[idx]
 
 
+def _has_containment_risk(leaves: List["Leaf"], margin: float = 0.05) -> bool:
+    """粗略判断 leaf 是否可能完全包含（仅基于中心距离与尺度）"""
+    for i in range(len(leaves)):
+        for j in range(i + 1, len(leaves)):
+            pos_i = leaves[i].get_position()[0]
+            pos_j = leaves[j].get_position()[0]
+            dist = abs(pos_i - pos_j)
+            r_i = SIZE_LEVEL_MAP[leaves[i].size_level]
+            r_j = SIZE_LEVEL_MAP[leaves[j].size_level]
+            if dist <= abs(r_i - r_j) + margin:
+                return True
+    return False
+
+
+def enforce_leaf_separation(leaves: List["Leaf"]) -> None:
+    """调整 leaf 位置/位移档位，降低完全包含导致不可见的概率"""
+    if len(leaves) < 2:
+        return
+
+    # 先避免过近的位移档位
+    for leaf in leaves:
+        if leaf.delta_level == DeltaLevel.NEAR:
+            leaf.delta_level = DeltaLevel.MID
+
+    if not _has_containment_risk(leaves):
+        return
+
+    # 提升位移档位，拉开中心距
+    for leaf in leaves:
+        leaf.delta_level = DeltaLevel.FAR
+
+    if not _has_containment_risk(leaves):
+        return
+
+    # 仍有风险时，强制拉开 slot
+    target_slots = [-1, 1] if len(leaves) == 2 else [-1, 0, 1]
+    for leaf, slot in zip(leaves, target_slots):
+        leaf.slot = slot
+
+
 def sample_random_csg(
     rng: np.random.Generator,
     leaf_count: int = 2,
@@ -460,7 +500,9 @@ def sample_random_csg(
             delta_level=_choice_enum(rng, delta_levels),
         )
         leaves.append(leaf)
-    
+
+    enforce_leaf_separation(leaves)
+
     # 构建二叉树
     if leaf_count == 1:
         return leaves[0]
