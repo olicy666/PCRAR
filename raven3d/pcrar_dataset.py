@@ -146,7 +146,9 @@ class PCRARDatasetGenerator:
         distractors = []
         distractor_reasons = []
         max_attempts = 50
-        while len(distractors) < self.config.n_candidates - 1:
+        for _ in range(max_attempts):
+            if len(distractors) >= self.config.n_candidates - 1:
+                break
             distractor, reason = generate_distractor(entity_b, rule, params, self.rng)
             if entities_equal(distractor, entity_correct, check_obs=True):
                 continue
@@ -154,8 +156,6 @@ class PCRARDatasetGenerator:
                 continue
             distractors.append(distractor)
             distractor_reasons.append(reason)
-            if len(distractors) < self.config.n_candidates - 1 and max_attempts > 0:
-                max_attempts -= 1
         if len(distractors) < self.config.n_candidates - 1:
             raise RuntimeError("Failed to generate unique distractors.")
         
@@ -231,7 +231,9 @@ class PCRARDatasetGenerator:
         distractors = []
         distractor_reasons = []
         max_attempts = 50
-        while len(distractors) < self.config.n_candidates - 1:
+        for _ in range(max_attempts):
+            if len(distractors) >= self.config.n_candidates - 1:
+                break
             distractor, reason = generate_distractor(entity_c, rule, params, self.rng)
             if entities_equal(distractor, entity_correct, check_obs=True):
                 continue
@@ -239,8 +241,6 @@ class PCRARDatasetGenerator:
                 continue
             distractors.append(distractor)
             distractor_reasons.append(reason)
-            if len(distractors) < self.config.n_candidates - 1 and max_attempts > 0:
-                max_attempts -= 1
         if len(distractors) < self.config.n_candidates - 1:
             raise RuntimeError("Failed to generate unique distractors.")
         
