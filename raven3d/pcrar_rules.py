@@ -19,7 +19,6 @@ from .csg import (
 )
 from .pcrar_entity import (
     PCRAREntity, ObservationConfig, sample_random_entity,
-    DENSITY_PRESETS_1, DENSITY_PRESETS_2, DENSITY_PRESETS_3,
 )
 
 
@@ -110,24 +109,11 @@ def _choice_from_list(rng: np.random.Generator, lst: list):
     return lst[idx]
 
 
-def _get_density_weights(entity: PCRAREntity, n_leaves: int) -> np.ndarray:
-    """获取当前实体的密度权重（与采样逻辑一致）"""
-    if entity.obs.part_sampling_weights and len(entity.obs.part_sampling_weights) == n_leaves:
-        weights = np.array(entity.obs.part_sampling_weights, dtype=float)
-    else:
-        if n_leaves == 1:
-            presets = DENSITY_PRESETS_1
-        elif n_leaves == 2:
-            presets = DENSITY_PRESETS_2
-        else:
-            presets = DENSITY_PRESETS_3
-        idx = entity.obs.density_preset_idx % len(presets)
-        weights = np.array(presets[idx], dtype=float)
-        if len(weights) != n_leaves:
-            weights = np.ones(n_leaves, dtype=float) / n_leaves
-    if weights.sum() <= 0:
-        weights = np.ones(n_leaves, dtype=float) / n_leaves
-    return weights / weights.sum()
+def _get_density_weights(_entity: PCRAREntity, n_leaves: int) -> np.ndarray:
+    """获取当前实体的密度权重（与采样逻辑一致，leaf 均分）"""
+    if n_leaves <= 0:
+        return np.array([], dtype=float)
+    return np.ones(n_leaves, dtype=float) / float(n_leaves)
 
 
 class ProgressionRule(PCRARRule):
@@ -186,11 +172,9 @@ class ProgressionRule(PCRARRule):
             return True
         elif params.axis == "d":
             # 密度档位
-            leaf_count = len(leaves)
-            from .pcrar_entity import DENSITY_PRESETS_2, DENSITY_PRESETS_3
-            presets = DENSITY_PRESETS_2 if leaf_count == 2 else DENSITY_PRESETS_3
+            from .pcrar_entity import DENSITY_POINT_PRESETS
             new_idx = entity.obs.density_preset_idx + direction
-            return 0 <= new_idx < len(presets)
+            return 0 <= new_idx < len(DENSITY_POINT_PRESETS)
         
         return True
     
@@ -220,11 +204,10 @@ class ProgressionRule(PCRARRule):
                 leaf.slot = SLOTS[new_slot_idx]
         elif params.axis == "d":
             # 密度档位递进
-            leaf_count = len(leaves)
-            from .pcrar_entity import DENSITY_PRESETS_2, DENSITY_PRESETS_3
-            presets = DENSITY_PRESETS_2 if leaf_count == 2 else DENSITY_PRESETS_3
-            new_idx = max(0, min(len(presets) - 1, new_entity.obs.density_preset_idx + direction))
+            from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
+            new_idx = max(0, min(len(DENSITY_POINT_PRESETS) - 1, new_entity.obs.density_preset_idx + direction))
             new_entity.obs.density_preset_idx = new_idx
+            new_entity.obs.n_points = density_point_count(new_idx)
         
         return new_entity
     
@@ -475,6 +458,8 @@ class CountRule(PCRARRule):
         
         new_obs = entity.obs.copy()
         new_obs.density_preset_idx = 0
+        from .pcrar_entity import density_point_count
+        new_obs.n_points = density_point_count(new_obs.density_preset_idx)
         return PCRAREntity(csg=new_csg, obs=new_obs)
     
     def check(self, entity_a: PCRAREntity, entity_b: PCRAREntity, params: RuleParams) -> bool:

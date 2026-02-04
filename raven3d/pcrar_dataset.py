@@ -133,6 +133,12 @@ class PCRARDatasetGenerator:
                     rule, params = self._sample_rule(entity_a, preferred_axis=preferred_axis)
                 except RuntimeError:
                     continue
+                if params.axis == "d" and rule.template == RuleTemplate.PROGRESSION:
+                    from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
+                    max_idx = len(DENSITY_POINT_PRESETS) - 1
+                    params.direction = -1
+                    entity_a.obs.density_preset_idx = max_idx
+                    entity_a.obs.n_points = density_point_count(max_idx)
                 if params.axis in ("r", "p"):
                     entity_a = self._adjust_entity_for_rule(entity_a, rule, params)
                 entity_b = rule.apply(entity_a, params)
@@ -217,6 +223,15 @@ class PCRARDatasetGenerator:
                 rule, params = self._sample_rule(entity_a, preferred_axis=preferred_axis)
             except RuntimeError:
                 continue
+            if params.axis == "d" and rule.template == RuleTemplate.PROGRESSION:
+                from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
+                max_idx = len(DENSITY_POINT_PRESETS) - 1
+                cur_idx = entity_a.obs.density_preset_idx
+                if cur_idx <= 0:
+                    params.direction = 1
+                elif cur_idx >= max_idx:
+                    params.direction = -1
+                entity_a.obs.n_points = density_point_count(cur_idx)
             entity_b = rule.apply(entity_a, params)
             break
         else:
@@ -375,7 +390,15 @@ class PCRARDatasetGenerator:
                     leaf.slot = SLOTS[0]
                 else:
                     leaf.slot = SLOTS[-1]
-        
+        elif params.axis == "d":
+            from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
+            max_idx = len(DENSITY_POINT_PRESETS) - 1
+            if params.direction == 1:
+                new_entity.obs.density_preset_idx = 0
+            else:
+                new_entity.obs.density_preset_idx = max_idx
+            new_entity.obs.n_points = density_point_count(new_entity.obs.density_preset_idx)
+
         return new_entity
     
     def _save_sample(
@@ -402,7 +425,7 @@ class PCRARDatasetGenerator:
         for i, entity in enumerate(inputs):
             filename = f"in_{i}.ply"
             filepath = sample_dir / filename
-            points = entity.sample_point_cloud(self.rng, n_points=self.config.n_points)
+            points = entity.sample_point_cloud(self.rng, n_points=None)
             write_ply(filepath, points, color=COLOR_MAP.get(filename))
             input_paths.append(f"{sample_id}/{filename}")
             input_entities.append(entity.to_dict())
@@ -413,7 +436,7 @@ class PCRARDatasetGenerator:
         for i, entity in enumerate(candidates):
             filename = f"cand_{i}.ply"
             filepath = sample_dir / filename
-            points = entity.sample_point_cloud(self.rng, n_points=self.config.n_points)
+            points = entity.sample_point_cloud(self.rng, n_points=None)
             write_ply(filepath, points, color=COLOR_MAP.get(filename))
             candidate_paths.append(f"{sample_id}/{filename}")
             candidate_entities.append(entity.to_dict())
@@ -479,7 +502,8 @@ class PCRARDatasetGenerator:
             elif axis == "p":
                 core = f"递进规则：整体槽位 slot {shift_word}1 格（所有 leaf 同步）。"
             elif axis == "d":
-                core = f"递进规则：采样密度档位{dir_word}1（权重变化）。"
+                density_word = "降档" if direction >= 0 else "升档"
+                core = f"递进规则：采样点数档位{density_word}1（总点数变化，leaf 均分）。"
             else:
                 core = "递进规则：沿同一属性做离散步进。"
         elif rule.template == RuleTemplate.CYCLE:

@@ -25,23 +25,25 @@ DEFAULT_BOUNDARY_EPS = 0.005
 DEFAULT_BOUNDARY_SAMPLES = 8
 DEFAULT_MAX_ITERATIONS = 20
 
-# 密度离散档
-DENSITY_PRESETS_1 = [
-    [1.0],
-]
+# 密度离散档（总点数档位，leaf 均分）
+DENSITY_POINT_PRESETS = [8192, 6144, 4096]
 
-DENSITY_PRESETS_2 = [
-    [0.5, 0.5],
-    [0.8, 0.2],
-    [0.2, 0.8],
-]
+# 兼容历史接口：密度权重按均分处理
+DENSITY_PRESETS_1 = [[1.0], [1.0], [1.0]]
+DENSITY_PRESETS_2 = [[0.5, 0.5], [0.5, 0.5], [0.5, 0.5]]
+DENSITY_PRESETS_3 = [[1 / 3, 1 / 3, 1 / 3]] * 3
 
-DENSITY_PRESETS_3 = [
-    [0.8, 0.15, 0.05],
-    [0.7, 0.2, 0.1],
-    [0.6, 0.25, 0.15],
-    [0.5, 0.3, 0.2],
-]
+
+def density_point_count(idx: int) -> int:
+    """根据密度档位返回总点数"""
+    if not DENSITY_POINT_PRESETS:
+        return DEFAULT_N_POINTS
+    idx = int(idx)
+    if idx < 0:
+        idx = 0
+    elif idx >= len(DENSITY_POINT_PRESETS):
+        idx = len(DENSITY_POINT_PRESETS) - 1
+    return int(DENSITY_POINT_PRESETS[idx])
 
 
 @dataclass
@@ -159,7 +161,8 @@ class PCRAREntity:
             (n_points, 3) 点云数组
         """
         if n_points is None:
-            n_points = self.obs.n_points
+            n_points = density_point_count(self.obs.density_preset_idx)
+            self.obs.n_points = n_points
 
         leaves = self.get_leaves()
         n_leaves = len(leaves)
@@ -229,22 +232,10 @@ class PCRAREntity:
 
     def _get_sampling_weights(self, n_leaves: int) -> np.ndarray:
         """获取采样权重"""
-        if self.obs.part_sampling_weights and len(self.obs.part_sampling_weights) == n_leaves:
-            weights = np.array(self.obs.part_sampling_weights)
-        else:
-            # 使用预设密度档
-            if n_leaves == 1:
-                presets = DENSITY_PRESETS_1
-            elif n_leaves == 2:
-                presets = DENSITY_PRESETS_2
-            else:
-                presets = DENSITY_PRESETS_3
-            idx = self.obs.density_preset_idx % len(presets)
-            weights = np.array(presets[idx])
-            if len(weights) != n_leaves:
-                weights = np.ones(n_leaves) / n_leaves
-        
-        return weights / weights.sum()
+        if n_leaves <= 0:
+            return np.array([], dtype=float)
+        weights = np.ones(n_leaves, dtype=float) / float(n_leaves)
+        return weights
 
     def _check_boundary(
         self,
@@ -336,16 +327,12 @@ def sample_random_entity(
     global_pose_deg = tuple(int(rng.choice(DISCRETE_ANGLES)) for _ in range(3))
     
     # 随机密度档位
-    if leaf_count == 1:
-        density_preset_idx = int(rng.integers(len(DENSITY_PRESETS_1)))
-    elif leaf_count == 2:
-        density_preset_idx = int(rng.integers(len(DENSITY_PRESETS_2)))
-    else:
-        density_preset_idx = int(rng.integers(len(DENSITY_PRESETS_3)))
+    density_preset_idx = int(rng.integers(len(DENSITY_POINT_PRESETS)))
+    n_points = density_point_count(density_preset_idx)
     
     obs = ObservationConfig(
         global_pose_deg=global_pose_deg,
-        n_points=DEFAULT_N_POINTS,
+        n_points=n_points,
         density_preset_idx=density_preset_idx,
     )
     
