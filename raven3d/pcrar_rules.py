@@ -296,19 +296,37 @@ class CycleRule(PCRARRule):
 class CopyRule(PCRARRule):
     """Rule3 Copy（拷贝）
     
-    仅改变尺寸：按左右顺序做循环拷贝（正向/逆向）。
+    按左右顺序做循环拷贝（正向/逆向）：
+    - 尺寸+密度拷贝：要求全部形状相同
+    - 形状拷贝：允许不同形状
     """
     template = RuleTemplate.COPY
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.COPY]
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
         leaf_count = entity.leaf_count()
-        if leaf_count <= 1:
+        if leaf_count != 3:
             return RuleParams(template=self.template)
+        leaves = entity.get_leaves()
+        prims = [leaf.prim_type for leaf in leaves]
+        sizes = [leaf.size_level for leaf in leaves]
+
+        candidates = []
+        if len(set(prims)) == 1 and len(set(sizes)) == 3:
+            candidates.append("copy_size_cycle")
+        if len(set(prims)) == 1:
+            candidates.append("copy_density_cycle")
+        if len(set(prims)) == 3:
+            candidates.append("copy_shape_cycle")
+
+        if not candidates:
+            return RuleParams(template=self.template)
+
+        axis = _choice_from_list(rng, candidates)
         direction = int(_choice_from_list(rng, [-1, 1]))
         params = RuleParams(
             template=self.template,
-            axis="copy_size_cycle",
+            axis=axis,
             direction=direction,
         )
         for _ in range(20):
@@ -320,9 +338,22 @@ class CopyRule(PCRARRule):
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
         if entity.leaf_count() != 3:
             return False
-        sizes = [leaf.size_level for leaf in entity.get_leaves()]
-        # 三者尺寸必须全不同，否则循环拷贝无效
-        return len(set(sizes)) == 3
+        leaves = entity.get_leaves()
+        prims = [leaf.prim_type for leaf in leaves]
+        sizes = [leaf.size_level for leaf in leaves]
+        if params.axis == "copy_size_cycle":
+            # 尺寸拷贝：形状必须相同，尺寸必须全不同
+            return len(set(prims)) == 1 and len(set(sizes)) == 3
+        if params.axis == "copy_density_cycle":
+            # 密度拷贝：形状必须相同，且密度权重必须可区分
+            if len(set(prims)) != 1:
+                return False
+            weights = _get_density_weights(entity, len(leaves))
+            return len(set(float(w) for w in weights)) == 3
+        if params.axis == "copy_shape_cycle":
+            # 形状拷贝：三种形状全不同
+            return len(set(prims)) == 3
+        return False
     
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:
         new_entity = entity.copy()
@@ -335,16 +366,40 @@ class CopyRule(PCRARRule):
         order = list(range(leaf_count))
         order.sort(key=lambda i: (leaves[i].slot, leaves[i].id))
 
-        # 正向：每个叶子拷贝右侧邻居的尺寸（最右拷贝最左）
-        # 逆向：每个叶子拷贝左侧邻居的尺寸（最左拷贝最右）
-        sizes = [leaves[i].size_level for i in order]
-        if params.direction == 1:
-            sources = sizes[1:] + sizes[:1]
-        else:
-            sources = sizes[-1:] + sizes[:-1]
+        if params.axis == "copy_size_cycle":
+            # 正向：每个叶子拷贝右侧邻居的尺寸（最右拷贝最左）
+            # 逆向：每个叶子拷贝左侧邻居的尺寸（最左拷贝最右）
+            sizes = [leaves[i].size_level for i in order]
+            if params.direction == 1:
+                size_sources = sizes[1:] + sizes[:1]
+            else:
+                size_sources = sizes[-1:] + sizes[:-1]
 
-        for idx, src_size in zip(order, sources):
-            leaves[idx].size_level = src_size
+            for idx, src_size in zip(order, size_sources):
+                leaves[idx].size_level = src_size
+        elif params.axis == "copy_density_cycle":
+            # 正向：每个叶子拷贝右侧邻居的密度（最右拷贝最左）
+            # 逆向：每个叶子拷贝左侧邻居的密度（最左拷贝最右）
+            weights = _get_density_weights(new_entity, leaf_count)
+            if params.direction == 1:
+                weight_sources = [weights[i] for i in order[1:] + order[:1]]
+            else:
+                weight_sources = [weights[i] for i in order[-1:] + order[:-1]]
+            new_weights = weights.copy()
+            for idx, src_w in zip(order, weight_sources):
+                new_weights[idx] = src_w
+            if new_weights.sum() > 0:
+                new_weights = new_weights / new_weights.sum()
+            new_entity.obs.part_sampling_weights = [float(w) for w in new_weights]
+        elif params.axis == "copy_shape_cycle":
+            # 形状循环拷贝
+            shapes = [leaves[i].prim_type for i in order]
+            if params.direction == 1:
+                shape_sources = shapes[1:] + shapes[:1]
+            else:
+                shape_sources = shapes[-1:] + shapes[:-1]
+            for idx, src_shape in zip(order, shape_sources):
+                leaves[idx].prim_type = src_shape
 
         return new_entity
     

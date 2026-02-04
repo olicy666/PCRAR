@@ -123,7 +123,10 @@ class PCRARDatasetGenerator:
         max_entity_attempts = 50
         max_rule_attempts = 50
         for _ in range(max_entity_attempts):
-            leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
+            if self.config.rule_filter == {RuleTemplate.COPY}:
+                leaf_count = 3
+            else:
+                leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
             entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
             for _ in range(max_rule_attempts):
                 try:
@@ -205,7 +208,10 @@ class PCRARDatasetGenerator:
         # 生成初始实体 A，并确保规则可应用
         max_entity_attempts = 50
         for _ in range(max_entity_attempts):
-            leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
+            if self.config.rule_filter == {RuleTemplate.COPY}:
+                leaf_count = 3
+            else:
+                leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
             entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
             try:
                 rule, params = self._sample_rule(entity_a, preferred_axis=preferred_axis)
@@ -296,6 +302,13 @@ class PCRARDatasetGenerator:
                             leaf_idx=None,
                             direction=direction,
                             rot_axis=rot_axis,
+                        )
+                    elif preferred_axis and template == RuleTemplate.COPY:
+                        direction = int(self.rng.choice([-1, 1]))
+                        params = RuleParams(
+                            template=RuleTemplate.COPY,
+                            axis=preferred_axis,
+                            direction=direction,
                         )
                     else:
                         params = rule.sample_params(self.rng, entity)
@@ -481,7 +494,14 @@ class PCRARDatasetGenerator:
             else:
                 core = f"循环规则：leaf{leaf_idx} 形状按序循环（Sphere→Box→Cylinder→Cone），方向 {dir_sign}1。"
         elif rule.template == RuleTemplate.COPY:
-            core = "拷贝规则：按左右顺序循环拷贝尺寸（正向/逆向），仅限 3 个 leaf。"
+            if axis == "copy_size_cycle":
+                core = "拷贝规则：同形状前提下，尺寸按左右顺序循环拷贝（正向/逆向）。"
+            elif axis == "copy_density_cycle":
+                core = "拷贝规则：同形状前提下，密度按左右顺序循环拷贝（正向/逆向）。"
+            elif axis == "copy_shape_cycle":
+                core = "拷贝规则：形状按左右顺序循环拷贝（正向/逆向），三种形状全不同。"
+            else:
+                core = "拷贝规则：按左右顺序循环拷贝（正向/逆向）。"
         elif rule.template == RuleTemplate.COUNT:
             if direction >= 0:
                 core = "增减规则：leaf 数量按 1→2→3→1 正向循环。"
@@ -543,6 +563,19 @@ class PCRARDatasetGenerator:
             and RuleTemplate.PROGRESSION in self.config.rule_filter
         ):
             axes = ["r", "R", "p", "d"]
+            base = num_samples // len(axes)
+            remainder = num_samples % len(axes)
+            axis_plan = []
+            for i, axis in enumerate(axes):
+                count = base + (1 if i < remainder else 0)
+                axis_plan.extend([axis] * count)
+            self.rng.shuffle(axis_plan)
+        elif (
+            self.config.rule_filter
+            and len(self.config.rule_filter) == 1
+            and RuleTemplate.COPY in self.config.rule_filter
+        ):
+            axes = ["copy_size_cycle", "copy_density_cycle", "copy_shape_cycle"]
             base = num_samples // len(axes)
             remainder = num_samples % len(axes)
             axis_plan = []
