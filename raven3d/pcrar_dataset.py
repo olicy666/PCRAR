@@ -183,7 +183,7 @@ class PCRARDatasetGenerator:
                     # 为 Symmetry 确保可以连续应用两次
                     leaves = entity_a.get_leaves()
                     if len(leaves) >= 2 and params.leaf_idx is not None and params.direction is not None:
-                        from .csg import SIZE_LEVELS, SLOTS
+                        from .pcrar_rules import SIZE_LEVELS, SLOTS
                         if params.axis == "p":
                             leaves[params.leaf_idx].slot = SLOTS[0]
                             leaves[params.direction].slot = SLOTS[-1]
