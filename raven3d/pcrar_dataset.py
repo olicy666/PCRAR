@@ -359,6 +359,29 @@ class PCRARDatasetGenerator:
                             axis=preferred_axis,
                             direction=direction,
                         )
+                    elif preferred_axis and template == RuleTemplate.SYMMETRY:
+                        if preferred_axis == "d":
+                            direction = int(self.rng.choice([-1, 1]))
+                            params = RuleParams(
+                                template=RuleTemplate.SYMMETRY,
+                                axis=preferred_axis,
+                                direction=direction,
+                            )
+                        else:
+                            # 按 slot 从左到右选左右 leaf
+                            leaves = entity.get_leaves()
+                            indexed = list(enumerate(leaves))
+                            indexed.sort(key=lambda t: (t[1].slot, t[0]))
+                            left_idx = indexed[0][0]
+                            right_idx = indexed[-1][0]
+                            if left_idx == right_idx:
+                                right_idx = 1 if left_idx == 0 else 0
+                            params = RuleParams(
+                                template=RuleTemplate.SYMMETRY,
+                                axis=preferred_axis,
+                                leaf_idx=left_idx,
+                                direction=right_idx,
+                            )
                     else:
                         params = rule.sample_params(self.rng, entity)
                     if rule.can_apply(entity, params):
@@ -659,6 +682,20 @@ class PCRARDatasetGenerator:
             and RuleTemplate.COPY in self.config.rule_filter
         ):
             axes = ["copy_size_cycle", "copy_density_cycle", "copy_shape_cycle"]
+            base = num_samples // len(axes)
+            remainder = num_samples % len(axes)
+            axis_plan = []
+            for i, axis in enumerate(axes):
+                count = base + (1 if i < remainder else 0)
+                axis_plan.extend([axis] * count)
+            self.rng.shuffle(axis_plan)
+        elif (
+            self.config.rule_filter
+            and len(self.config.rule_filter) == 1
+            and RuleTemplate.SYMMETRY in self.config.rule_filter
+        ):
+            # 均衡 Symmetry 的位置/姿态/尺寸/密度四种属性
+            axes = ["p", "R", "r", "d"]
             base = num_samples // len(axes)
             remainder = num_samples % len(axes)
             axis_plan = []
