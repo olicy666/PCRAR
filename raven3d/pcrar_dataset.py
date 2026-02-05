@@ -424,10 +424,7 @@ class PCRARDatasetGenerator:
                             from .pcrar_rules import SIZE_LEVELS, SLOTS
                             leaves = entity.get_leaves()
                             if len(leaves) >= 2 and params.leaf_idx is not None and params.direction is not None:
-                                if params.axis == "p":
-                                    leaves[params.leaf_idx].slot = SLOTS[0]
-                                    leaves[params.direction].slot = SLOTS[-1]
-                                elif params.axis == "r":
+                                if params.axis == "r":
                                     leaves[params.leaf_idx].size_level = SIZE_LEVELS[0]
                                     leaves[params.direction].size_level = SIZE_LEVELS[-1]
                     else:
@@ -742,8 +739,8 @@ class PCRARDatasetGenerator:
             and len(self.config.rule_filter) == 1
             and RuleTemplate.SYMMETRY in self.config.rule_filter
         ):
-            # 均衡 Symmetry 的位置/姿态/尺寸/密度四种属性
-            axes = ["p", "R", "r", "d"]
+            # 均衡 Symmetry 的姿态/尺寸/密度三种属性（不包含位置）
+            axes = ["R", "r", "d"]
             base = num_samples // len(axes)
             remainder = num_samples % len(axes)
             axis_plan = []

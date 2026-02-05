@@ -599,7 +599,7 @@ class SymmetryRule(PCRARRule):
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.SYMMETRY]
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
-        axis = _choice_from_list(rng, ["p", "R", "r", "d"])  # 位置/姿态/尺寸/密度
+        axis = _choice_from_list(rng, ["R", "r", "d"])  # 姿态/尺寸/密度（不包含位置）
         if axis == "d":
             direction = int(_choice_from_list(rng, [-1, 1]))
             return RuleParams(
