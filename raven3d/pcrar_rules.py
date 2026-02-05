@@ -789,8 +789,12 @@ def generate_distractor(
     distractor = entity.copy()
     reason = ""
     
-    # 随机选择干扰方式
-    method = _choice_from_list(rng, ["different_axis", "different_direction", "different_leaf", "different_rule"])
+    # 随机选择干扰方式（Symmetry 的 direction 对应右侧索引，避免无意义翻转）
+    if params.template == RuleTemplate.SYMMETRY and params.axis in ("p", "R", "r"):
+        methods = ["different_axis", "different_leaf", "different_rule"]
+    else:
+        methods = ["different_axis", "different_direction", "different_leaf", "different_rule"]
+    method = _choice_from_list(rng, methods)
     
     if method == "different_axis" and params.axis:
         # 使用不同的属性轴
@@ -798,34 +802,46 @@ def generate_distractor(
         other_axes = [a for a in axes if a != params.axis]
         if other_axes:
             new_axis = _choice_from_list(rng, other_axes)
-            new_params = RuleParams(
-                template=params.template,
-                axis=new_axis,
-                leaf_idx=params.leaf_idx,
-                direction=params.direction,
-            )
+            if params.template == RuleTemplate.SYMMETRY and new_axis == "d":
+                # Symmetry 的密度轴使用方向步进
+                new_params = RuleParams(
+                    template=params.template,
+                    axis=new_axis,
+                    direction=int(_choice_from_list(rng, [-1, 1])),
+                )
+            else:
+                new_params = RuleParams(
+                    template=params.template,
+                    axis=new_axis,
+                    leaf_idx=params.leaf_idx,
+                    direction=params.direction,
+                )
             if rule.can_apply(distractor, new_params):
                 distractor = rule.apply(distractor, new_params)
                 reason = f"应用了错误的属性轴 {new_axis}，正确应为 {params.axis}"
                 return distractor, reason
     
     if method == "different_direction":
-        # 使用相反的方向
-        new_directions = None
-        if params.directions:
-            new_directions = [-d for d in params.directions]
-        new_params = RuleParams(
-            template=params.template,
-            axis=params.axis,
-            leaf_idx=params.leaf_idx,
-            direction=-params.direction,
-            leaf_indices=params.leaf_indices,
-            directions=new_directions,
-        )
-        if rule.can_apply(distractor, new_params):
-            distractor = rule.apply(distractor, new_params)
-            reason = "应用了相反的变换方向"
-            return distractor, reason
+        if params.template == RuleTemplate.SYMMETRY and params.axis in ("p", "R", "r"):
+            # Symmetry 的 direction 是右侧索引，不适合翻转
+            pass
+        else:
+            # 使用相反的方向
+            new_directions = None
+            if params.directions:
+                new_directions = [-d for d in params.directions]
+            new_params = RuleParams(
+                template=params.template,
+                axis=params.axis,
+                leaf_idx=params.leaf_idx,
+                direction=-params.direction,
+                leaf_indices=params.leaf_indices,
+                directions=new_directions,
+            )
+            if rule.can_apply(distractor, new_params):
+                distractor = rule.apply(distractor, new_params)
+                reason = "应用了相反的变换方向"
+                return distractor, reason
     
     if method == "different_leaf":
         # 应用到不同的叶节点
