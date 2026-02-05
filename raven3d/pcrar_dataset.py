@@ -182,6 +182,11 @@ class PCRARDatasetGenerator:
                 if rule.template == RuleTemplate.SYMMETRY:
                     # 为 Symmetry 确保可以连续应用两次
                     leaves = entity_a.get_leaves()
+                    if params.axis == "d":
+                        from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
+                        max_idx = len(DENSITY_POINT_PRESETS) - 1
+                        entity_a.obs.density_preset_idx = 0 if params.direction >= 0 else max_idx
+                        entity_a.obs.n_points = density_point_count(entity_a.obs.density_preset_idx)
                     if len(leaves) >= 2 and params.leaf_idx is not None and params.direction is not None:
                         from .pcrar_rules import SIZE_LEVELS, SLOTS
                         if params.axis == "p":
@@ -190,11 +195,6 @@ class PCRARDatasetGenerator:
                         elif params.axis == "r":
                             leaves[params.leaf_idx].size_level = SIZE_LEVELS[0]
                             leaves[params.direction].size_level = SIZE_LEVELS[-1]
-                        elif params.axis == "d":
-                            from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
-                            max_idx = len(DENSITY_POINT_PRESETS) - 1
-                            entity_a.obs.density_preset_idx = 0 if params.direction >= 0 else max_idx
-                            entity_a.obs.n_points = density_point_count(entity_a.obs.density_preset_idx)
                 if params.axis == "d" and rule.template == RuleTemplate.PROGRESSION:
                     from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
                     max_idx = len(DENSITY_POINT_PRESETS) - 1
