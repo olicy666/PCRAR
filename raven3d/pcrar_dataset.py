@@ -201,7 +201,7 @@ class PCRARDatasetGenerator:
                     params.direction = -1
                     entity_a.obs.density_preset_idx = max_idx
                     entity_a.obs.n_points = density_point_count(max_idx)
-                if params.axis in ("r", "p"):
+                if params.axis in ("r", "p") and rule.template == RuleTemplate.PROGRESSION:
                     entity_a = self._adjust_entity_for_rule(entity_a, rule, params)
                 entity_b = rule.apply(entity_a, params)
                 if rule.can_apply(entity_b, params):
@@ -305,7 +305,23 @@ class PCRARDatasetGenerator:
         # 确保规则可以应用到 C
         if not rule.can_apply(entity_c, params):
             # 调整参数或重新生成 C
-            entity_c = self._adjust_entity_for_rule(entity_c, rule, params)
+            if rule.template == RuleTemplate.SYMMETRY:
+                leaves = entity_c.get_leaves()
+                if params.axis == "d":
+                    from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
+                    max_idx = len(DENSITY_POINT_PRESETS) - 1
+                    entity_c.obs.density_preset_idx = 0 if params.direction >= 0 else max_idx
+                    entity_c.obs.n_points = density_point_count(entity_c.obs.density_preset_idx)
+                if len(leaves) >= 2 and params.leaf_idx is not None and params.direction is not None:
+                    from .pcrar_rules import SIZE_LEVELS, SLOTS
+                    if params.axis == "p":
+                        leaves[params.leaf_idx].slot = SLOTS[0]
+                        leaves[params.direction].slot = SLOTS[-1]
+                    elif params.axis == "r":
+                        leaves[params.leaf_idx].size_level = SIZE_LEVELS[0]
+                        leaves[params.direction].size_level = SIZE_LEVELS[-1]
+            else:
+                entity_c = self._adjust_entity_for_rule(entity_c, rule, params)
         
         # 生成正确答案 D* = T(C)
         entity_correct = rule.apply(entity_c, params)
