@@ -824,6 +824,12 @@ class PCRARDatasetGenerator:
                         correct_idx=correct_idx,
                         preferred_axis=preferred_axis,
                     )
+                    if (
+                        self.config.rule_filter == {RuleTemplate.COPY}
+                        and preferred_axis
+                        and entry.get("rule", {}).get("params", {}).get("axis") != preferred_axis
+                    ):
+                        raise RuntimeError("Copy axis mismatch; retrying to enforce 1/3 density ratio.")
                     break
                 except RuntimeError as exc:
                     if str(exc) not in retryable_errors:
