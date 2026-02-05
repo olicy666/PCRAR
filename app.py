@@ -463,7 +463,13 @@ def generate_exam(username: str, mode: str) -> None:
         rule_filter={rule_template},
     )
     generator = PCRARDatasetGenerator(config=config, seed=seed)
-    generator.generate_dataset(exam_dir, TOTAL_QUESTIONS)
+    try:
+        generator.generate_dataset(exam_dir, TOTAL_QUESTIONS)
+    except RuntimeError as exc:
+        st.session_state.exam_meta = []
+        st.session_state.exam_generated = False
+        st.error(f"生成题目失败：{exc}")
+        return
     
     meta_path = exam_dir / "meta.json"
     exam_meta = json.loads(meta_path.read_text(encoding="utf-8"))
