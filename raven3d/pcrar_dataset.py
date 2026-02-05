@@ -580,7 +580,7 @@ class PCRARDatasetGenerator:
             if axis == "copy_size_cycle":
                 core = "拷贝规则：同形状前提下，尺寸按左右顺序循环拷贝（正向/逆向）。"
             elif axis == "copy_density_cycle":
-                core = "拷贝规则：同形状前提下，密度按左右顺序循环拷贝（正向/逆向）。"
+                core = "拷贝规则：同形状前提下，采样点数档位按方向步进1（总点数变化）。"
             elif axis == "copy_shape_cycle":
                 core = "拷贝规则：形状按左右顺序循环拷贝（正向/逆向），三种形状全不同。"
             else:
@@ -602,7 +602,7 @@ class PCRARDatasetGenerator:
             elif axis == "r":
                 core = "对称规则：左右 leaf 尺寸镜像变化（左 +1，右 -1）。"
             elif axis == "d":
-                core = "对称规则：左右 leaf 密度镜像变化（左右密度对调）。"
+                core = "对称规则：采样点数档位按方向步进1（总点数变化）。"
             else:
                 core = "对称规则：左右 leaf 做镜像变换。"
         else:

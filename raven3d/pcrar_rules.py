@@ -280,7 +280,7 @@ class CopyRule(PCRARRule):
     """Rule3 Copy（拷贝）
     
     按左右顺序做循环拷贝（正向/逆向）：
-    - 尺寸+密度拷贝：要求全部形状相同
+    - 尺寸+密度拷贝：要求全部形状相同（密度为全局采样点数档位）
     - 形状拷贝：允许不同形状
     """
     template = RuleTemplate.COPY
@@ -328,11 +328,12 @@ class CopyRule(PCRARRule):
             # 尺寸拷贝：形状必须相同，尺寸必须全不同
             return len(set(prims)) == 1 and len(set(sizes)) == 3
         if params.axis == "copy_density_cycle":
-            # 密度拷贝：形状必须相同，且密度权重必须可区分
+            # 密度拷贝：形状必须相同，且密度档位可步进
             if len(set(prims)) != 1:
                 return False
-            weights = _get_density_weights(entity, len(leaves))
-            return len(set(float(w) for w in weights)) == 3
+            from .pcrar_entity import DENSITY_POINT_PRESETS
+            new_idx = entity.obs.density_preset_idx + params.direction
+            return 0 <= new_idx < len(DENSITY_POINT_PRESETS)
         if params.axis == "copy_shape_cycle":
             # 形状拷贝：三种形状全不同
             return len(set(prims)) == 3
@@ -361,19 +362,11 @@ class CopyRule(PCRARRule):
             for idx, src_size in zip(order, size_sources):
                 leaves[idx].size_level = src_size
         elif params.axis == "copy_density_cycle":
-            # 正向：每个叶子拷贝右侧邻居的密度（最右拷贝最左）
-            # 逆向：每个叶子拷贝左侧邻居的密度（最左拷贝最右）
-            weights = _get_density_weights(new_entity, leaf_count)
-            if params.direction == 1:
-                weight_sources = [weights[i] for i in order[1:] + order[:1]]
-            else:
-                weight_sources = [weights[i] for i in order[-1:] + order[:-1]]
-            new_weights = weights.copy()
-            for idx, src_w in zip(order, weight_sources):
-                new_weights[idx] = src_w
-            if new_weights.sum() > 0:
-                new_weights = new_weights / new_weights.sum()
-            new_entity.obs.part_sampling_weights = [float(w) for w in new_weights]
+            # 全局密度档位按方向步进
+            from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
+            new_idx = max(0, min(len(DENSITY_POINT_PRESETS) - 1, new_entity.obs.density_preset_idx + params.direction))
+            new_entity.obs.density_preset_idx = new_idx
+            new_entity.obs.n_points = density_point_count(new_idx)
         elif params.axis == "copy_shape_cycle":
             # 形状循环拷贝
             shapes = [leaves[i].prim_type for i in order]
@@ -607,6 +600,13 @@ class SymmetryRule(PCRARRule):
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
         axis = _choice_from_list(rng, ["p", "R", "r", "d"])  # 位置/姿态/尺寸/密度
+        if axis == "d":
+            direction = int(_choice_from_list(rng, [-1, 1]))
+            return RuleParams(
+                template=self.template,
+                axis=axis,
+                direction=direction,
+            )
         left_idx, right_idx = self._pick_left_right(entity)
         return RuleParams(
             template=self.template,
@@ -619,6 +619,11 @@ class SymmetryRule(PCRARRule):
         leaves = entity.get_leaves()
         if len(leaves) < 2:
             return False
+        if params.axis == "d":
+            from .pcrar_entity import DENSITY_POINT_PRESETS
+            new_idx = entity.obs.density_preset_idx + params.direction
+            return 0 <= new_idx < len(DENSITY_POINT_PRESETS)
+
         left_idx, right_idx = params.leaf_idx, params.direction
         if left_idx is None or right_idx is None:
             return False
@@ -646,9 +651,6 @@ class SymmetryRule(PCRARRule):
             left_idx_size = SIZE_LEVELS.index(left.size_level)
             right_idx_size = SIZE_LEVELS.index(right.size_level)
             return left_idx_size < len(SIZE_LEVELS) - 1 and right_idx_size > 0
-        elif params.axis == "d":
-            weights = _get_density_weights(entity, len(leaves))
-            return weights[left_idx] != weights[right_idx]
         
         return False
     
@@ -656,6 +658,13 @@ class SymmetryRule(PCRARRule):
         new_entity = entity.copy()
         leaves = new_entity.get_leaves()
         
+        if params.axis == "d":
+            from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
+            new_idx = max(0, min(len(DENSITY_POINT_PRESETS) - 1, new_entity.obs.density_preset_idx + params.direction))
+            new_entity.obs.density_preset_idx = new_idx
+            new_entity.obs.n_points = density_point_count(new_idx)
+            return new_entity
+
         if len(leaves) < 2:
             return new_entity
         left_idx, right_idx = params.leaf_idx, params.direction
@@ -692,14 +701,6 @@ class SymmetryRule(PCRARRule):
             right_size = SIZE_LEVELS.index(right.size_level)
             left.size_level = SIZE_LEVELS[min(len(SIZE_LEVELS) - 1, left_size + 1)]
             right.size_level = SIZE_LEVELS[max(0, right_size - 1)]
-        elif params.axis == "d":
-            weights = _get_density_weights(new_entity, len(leaves))
-            weights = weights.copy()
-            weights[left_idx], weights[right_idx] = weights[right_idx], weights[left_idx]
-            if weights.sum() > 0:
-                weights = weights / weights.sum()
-            new_entity.obs.part_sampling_weights = [float(w) for w in weights]
-        
         return new_entity
 
     def _pick_left_right(self, entity: PCRAREntity) -> Tuple[int, int]:
