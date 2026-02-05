@@ -320,6 +320,27 @@ class PCRARDatasetGenerator:
                     elif params.axis == "r":
                         leaves[params.leaf_idx].size_level = SIZE_LEVELS[0]
                         leaves[params.direction].size_level = SIZE_LEVELS[-1]
+            elif rule.template == RuleTemplate.COPY:
+                leaves = entity_c.get_leaves()
+                if params.axis == "copy_size_cycle":
+                    if leaves:
+                        from .csg import PRIM_TYPE_CYCLE
+                        base_shape = leaves[0].prim_type
+                        for leaf in leaves[1:]:
+                            leaf.prim_type = base_shape
+                        # 尺寸全不同（S/M/L）
+                        from .pcrar_rules import SIZE_LEVELS
+                        for i, leaf in enumerate(leaves):
+                            leaf.size_level = SIZE_LEVELS[i % len(SIZE_LEVELS)]
+                elif params.axis == "copy_density_cycle":
+                    if leaves:
+                        base_shape = leaves[0].prim_type
+                        for leaf in leaves[1:]:
+                            leaf.prim_type = base_shape
+                elif params.axis == "copy_shape_cycle":
+                    from .csg import PRIM_TYPE_CYCLE
+                    for i, leaf in enumerate(leaves):
+                        leaf.prim_type = PRIM_TYPE_CYCLE[i % len(PRIM_TYPE_CYCLE)]
             else:
                 entity_c = self._adjust_entity_for_rule(entity_c, rule, params)
         
