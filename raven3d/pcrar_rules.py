@@ -109,10 +109,16 @@ def _choice_from_list(rng: np.random.Generator, lst: list):
     return lst[idx]
 
 
-def _get_density_weights(_entity: PCRAREntity, n_leaves: int) -> np.ndarray:
-    """获取当前实体的密度权重（与采样逻辑一致，leaf 均分）"""
+def _get_density_weights(entity: PCRAREntity, n_leaves: int) -> np.ndarray:
+    """获取当前实体的密度权重（若未设置则均分）"""
     if n_leaves <= 0:
         return np.array([], dtype=float)
+    weights = entity.obs.part_sampling_weights
+    if weights and len(weights) == n_leaves:
+        arr = np.array([float(w) for w in weights], dtype=float)
+        arr = np.clip(arr, 0.0, None)
+        if arr.sum() > 0:
+            return arr / arr.sum()
     return np.ones(n_leaves, dtype=float) / float(n_leaves)
 
 
@@ -328,12 +334,11 @@ class CopyRule(PCRARRule):
             # 尺寸拷贝：形状必须相同，尺寸必须全不同
             return len(set(prims)) == 1 and len(set(sizes)) == 3
         if params.axis == "copy_density_cycle":
-            # 密度拷贝：形状必须相同，且密度档位可步进
+            # 密度拷贝：形状必须相同，且三份密度权重可区分
             if len(set(prims)) != 1:
                 return False
-            from .pcrar_entity import DENSITY_POINT_PRESETS
-            new_idx = entity.obs.density_preset_idx + params.direction
-            return 0 <= new_idx < len(DENSITY_POINT_PRESETS)
+            weights = _get_density_weights(entity, len(leaves))
+            return len(set(float(w) for w in weights)) == 3
         if params.axis == "copy_shape_cycle":
             # 形状拷贝：三种形状全不同
             return len(set(prims)) == 3
@@ -362,11 +367,18 @@ class CopyRule(PCRARRule):
             for idx, src_size in zip(order, size_sources):
                 leaves[idx].size_level = src_size
         elif params.axis == "copy_density_cycle":
-            # 全局密度档位按方向步进
-            from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
-            new_idx = max(0, min(len(DENSITY_POINT_PRESETS) - 1, new_entity.obs.density_preset_idx + params.direction))
-            new_entity.obs.density_preset_idx = new_idx
-            new_entity.obs.n_points = density_point_count(new_idx)
+            # 密度权重按 slot 顺序循环拷贝
+            weights = _get_density_weights(new_entity, leaf_count)
+            if params.direction == 1:
+                weight_sources = [weights[i] for i in order[1:] + order[:1]]
+            else:
+                weight_sources = [weights[i] for i in order[-1:] + order[:-1]]
+            new_weights = weights.copy()
+            for idx, src_w in zip(order, weight_sources):
+                new_weights[idx] = src_w
+            if new_weights.sum() > 0:
+                new_weights = new_weights / new_weights.sum()
+            new_entity.obs.part_sampling_weights = [float(w) for w in new_weights]
         elif params.axis == "copy_shape_cycle":
             # 形状循环拷贝
             shapes = [leaves[i].prim_type for i in order]

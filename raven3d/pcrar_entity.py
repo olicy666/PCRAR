@@ -234,6 +234,11 @@ class PCRAREntity:
         """获取采样权重"""
         if n_leaves <= 0:
             return np.array([], dtype=float)
+        if self.obs.part_sampling_weights and len(self.obs.part_sampling_weights) == n_leaves:
+            weights = np.array([float(w) for w in self.obs.part_sampling_weights], dtype=float)
+            weights = np.clip(weights, 0.0, None)
+            if weights.sum() > 0:
+                return weights / weights.sum()
         weights = np.ones(n_leaves, dtype=float) / float(n_leaves)
         return weights
 

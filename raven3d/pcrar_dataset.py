@@ -60,6 +60,23 @@ class PCRARDatasetGenerator:
             np.random.seed(seed)
         self._progression_axis_counts = {"r": 0, "R": 0, "p": 0, "d": 0}
 
+    def _ensure_copy_density_weights(self, entity: PCRAREntity) -> None:
+        """为 copy_density_cycle 准备可区分的密度权重（总点数固定为 8192）"""
+        leaves = entity.get_leaves()
+        if len(leaves) != 3:
+            return
+        # 形状保持一致
+        base_shape = leaves[0].prim_type
+        for leaf in leaves[1:]:
+            leaf.prim_type = base_shape
+        # 固定为 8192，总点数不变
+        from .pcrar_entity import DEFAULT_N_POINTS
+        entity.obs.density_preset_idx = 0
+        entity.obs.n_points = DEFAULT_N_POINTS
+        # 使用可区分且和为 1 的权重
+        weights = np.array([0.5, 0.3125, 0.1875], dtype=float)
+        entity.obs.part_sampling_weights = [float(w) for w in weights]
+
     def _choose_progression_params(
         self,
         entity: PCRAREntity,
@@ -301,6 +318,8 @@ class PCRARDatasetGenerator:
         
         # 生成 C（与 A 结构相似但不同）
         entity_c = self._generate_compatible_entity(entity_a, rule, params)
+        if rule.template == RuleTemplate.COPY and params.axis == "copy_density_cycle":
+            self._ensure_copy_density_weights(entity_c)
         
         # 确保规则可以应用到 C
         if not rule.can_apply(entity_c, params):
@@ -407,6 +426,8 @@ class PCRARDatasetGenerator:
                         params = self._choose_progression_params(entity, preferred_axis=preferred_axis)
                     elif preferred_axis and template == RuleTemplate.COPY:
                         direction = int(self.rng.choice([-1, 1]))
+                        if preferred_axis == "copy_density_cycle":
+                            self._ensure_copy_density_weights(entity)
                         params = RuleParams(
                             template=RuleTemplate.COPY,
                             axis=preferred_axis,
@@ -458,6 +479,8 @@ class PCRARDatasetGenerator:
                                     leaves[params.direction].size_level = SIZE_LEVELS[-1]
                     else:
                         params = rule.sample_params(self.rng, entity)
+                    if template == RuleTemplate.COPY and params.axis == "copy_density_cycle":
+                        self._ensure_copy_density_weights(entity)
                     if rule.can_apply(entity, params):
                         if template == RuleTemplate.PROGRESSION and params.axis:
                             self._progression_axis_counts[params.axis] = (
@@ -479,6 +502,8 @@ class PCRARDatasetGenerator:
                         continue
                 else:
                     params = rule.sample_params(self.rng, entity)
+                if template == RuleTemplate.COPY and params.axis == "copy_density_cycle":
+                    self._ensure_copy_density_weights(entity)
                 if rule.can_apply(entity, params):
                     if template == RuleTemplate.PROGRESSION and params.axis:
                         self._progression_axis_counts[params.axis] = (
@@ -677,7 +702,7 @@ class PCRARDatasetGenerator:
             if axis == "copy_size_cycle":
                 core = "拷贝规则：同形状前提下，尺寸按左右顺序循环拷贝（正向/逆向）。"
             elif axis == "copy_density_cycle":
-                core = "拷贝规则：同形状前提下，采样点数档位按方向步进1（总点数变化）。"
+                core = "拷贝规则：同形状前提下，leaf 点数权重按左右顺序循环拷贝（总点数 8192）。"
             elif axis == "copy_shape_cycle":
                 core = "拷贝规则：形状按左右顺序循环拷贝（正向/逆向），三种形状全不同。"
             else:
