@@ -435,6 +435,14 @@ class PCRARDatasetGenerator:
                                 leaf_idx=left_idx,
                                 direction=right_idx,
                             )
+                            if params.axis == "R":
+                                from .csg import PrimType
+                                left = leaves[left_idx]
+                                right = leaves[right_idx]
+                                if left.prim_type == PrimType.SPHERE:
+                                    left.prim_type = PrimType.BOX
+                                if right.prim_type == PrimType.SPHERE:
+                                    right.prim_type = PrimType.BOX
                         # 预先调整实体，让 Symmetry 的目标轴可应用（避免偏向 R/d）
                         if params.axis == "d":
                             from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
