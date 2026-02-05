@@ -414,6 +414,22 @@ class PCRARDatasetGenerator:
                                 leaf_idx=left_idx,
                                 direction=right_idx,
                             )
+                        # 预先调整实体，让 Symmetry 的目标轴可应用（避免偏向 R/d）
+                        if params.axis == "d":
+                            from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
+                            max_idx = len(DENSITY_POINT_PRESETS) - 1
+                            entity.obs.density_preset_idx = 0 if params.direction >= 0 else max_idx
+                            entity.obs.n_points = density_point_count(entity.obs.density_preset_idx)
+                        else:
+                            from .pcrar_rules import SIZE_LEVELS, SLOTS
+                            leaves = entity.get_leaves()
+                            if len(leaves) >= 2 and params.leaf_idx is not None and params.direction is not None:
+                                if params.axis == "p":
+                                    leaves[params.leaf_idx].slot = SLOTS[0]
+                                    leaves[params.direction].slot = SLOTS[-1]
+                                elif params.axis == "r":
+                                    leaves[params.leaf_idx].size_level = SIZE_LEVELS[0]
+                                    leaves[params.direction].size_level = SIZE_LEVELS[-1]
                     else:
                         params = rule.sample_params(self.rng, entity)
                     if rule.can_apply(entity, params):
