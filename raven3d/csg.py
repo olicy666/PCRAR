@@ -46,16 +46,16 @@ class DeltaLevel(str, Enum):
 
 # 尺寸档位映射到 scale 值
 SIZE_LEVEL_MAP: Dict[SizeLevel, float] = {
-    SizeLevel.S: 0.8,
+    SizeLevel.S: 2.0 / 3.0,
     SizeLevel.M: 1.0,
-    SizeLevel.L: 1.2,
+    SizeLevel.L: 1.5,
 }
 
-# Delta 档位映射到实际位移量
+# Delta 档位映射到“单步位移占模型宽度比例”
 DELTA_LEVEL_MAP: Dict[DeltaLevel, float] = {
-    DeltaLevel.NEAR: 0.35,
+    DeltaLevel.NEAR: 0.25,
     DeltaLevel.MID: 0.50,
-    DeltaLevel.FAR: 0.65,
+    DeltaLevel.FAR: 0.75,
 }
 
 # 离散角度列表（度）
@@ -91,7 +91,10 @@ class Leaf:
 
     def get_position(self) -> np.ndarray:
         """获取实际位置（基于 slot 和 delta_level）"""
-        delta = DELTA_LEVEL_MAP[self.delta_level]
+        # 让位移步长与当前尺寸绑定：单步位移 = ratio * width_x。
+        # 对本项目基础 primitive（局部 x 范围 [-0.5, 0.5]）有 width_x = scale。
+        delta_ratio = DELTA_LEVEL_MAP[self.delta_level]
+        delta = delta_ratio * self.get_scale()
         return np.array([self.slot * delta, 0.0, 0.0])
 
     def get_rotation_matrix(self) -> np.ndarray:

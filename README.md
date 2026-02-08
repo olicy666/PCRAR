@@ -44,9 +44,9 @@ Attr(E) = (CSG, O)
 | Shape | 基本几何体类型 | Sphere, Box, Cylinder, Cone |
 | Boolean Ops | CSG 操作类型 | Union, Diff, Intersect |
 | PartCount | 叶节点数量 | 2, 3 |
-| Size | 尺寸档位 | S(0.8), M(1.0), L(1.2) |
+| Size | 尺寸档位 | S(0.667), M(1.0), L(1.5)（每升一档 ×1.5） |
 | Pose | 离散旋转角度 | 0°, 60°, 120°, 180°, 240°, 300° |
-| Position | 位置槽位 + delta 档 | slot: -1/0/+1, delta: Near/Mid/Far |
+| Position | 位置槽位 + delta 档 | slot: -1/0/+1, delta: Near/Mid/Far（单步位移比例 0.25/0.5/0.75，按当前尺寸缩放） |
 | Density | 采样权重档位 | 均匀/偏左/偏右 等 |
 
 ### 规则库（7 条）
