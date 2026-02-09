@@ -44,6 +44,7 @@ class PCRARConfig:
         default_factory=lambda: [OpType.UNION]
     )
     rule_filter: Optional[Set[RuleTemplate]] = None
+    generate_confusing_view: bool = False  # 是否生成迷惑性视角渲染
 
 
 class PCRARDatasetGenerator:
@@ -603,6 +604,7 @@ class PCRARDatasetGenerator:
         # 保存输入点云
         input_paths = []
         input_entities = []
+        input_point_clouds = []  # 用于视角渲染
         for i, entity in enumerate(inputs):
             filename = f"in_{i}.ply"
             filepath = sample_dir / filename
@@ -610,10 +612,12 @@ class PCRARDatasetGenerator:
             write_ply(filepath, points, color=COLOR_MAP.get(filename))
             input_paths.append(f"{sample_id}/{filename}")
             input_entities.append(entity.to_dict())
+            input_point_clouds.append(points)
         
         # 保存候选点云
         candidate_paths = []
         candidate_entities = []
+        candidate_point_clouds = []  # 用于视角渲染
         for i, entity in enumerate(candidates):
             filename = f"cand_{i}.ply"
             filepath = sample_dir / filename
@@ -621,10 +625,28 @@ class PCRARDatasetGenerator:
             write_ply(filepath, points, color=COLOR_MAP.get(filename))
             candidate_paths.append(f"{sample_id}/{filename}")
             candidate_entities.append(entity.to_dict())
+            candidate_point_clouds.append(points)
         
         # 生成标签
         gt_labels = ["A", "B", "C", "D"]
         gt_label = gt_labels[correct_idx] if correct_idx < len(gt_labels) else str(correct_idx)
+        
+        # 生成迷惑性视角渲染（可选）
+        confusing_view_meta = None
+        if self.config.generate_confusing_view:
+            try:
+                from .render_confusing_view import generate_confusing_view_for_sample
+                confusing_view_meta = generate_confusing_view_for_sample(
+                    rule_template=rule.template,
+                    params=params,
+                    entities=inputs + candidates,
+                    input_point_clouds=input_point_clouds,
+                    candidate_point_clouds=candidate_point_clouds,
+                    output_dir=sample_dir,
+                    rng=self.rng,
+                )
+            except Exception as e:
+                print(f"Warning: Failed to generate confusing view for {sample_id}: {e}")
         
         # 构建元数据
         meta = {
@@ -649,6 +671,10 @@ class PCRARDatasetGenerator:
                 "distractors": [r for i, r in enumerate(candidate_reasons) if i != correct_idx],
             },
         }
+        
+        # 添加迷惑性视角元数据
+        if confusing_view_meta:
+            meta["confusing_view"] = confusing_view_meta
         
         write_meta(sample_dir / "meta.json", meta)
         return meta

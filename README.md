@@ -73,6 +73,13 @@ python main.py --mode pcrar \
     --leaf-count-max 3 \
     --pcrar-rules Progression,Cycle,Copy \
     --seed 0
+
+# 生成带迷惑性2D视角的数据集（用于对比实验）
+python main.py --mode pcrar \
+    --output output_with_view \
+    --num-samples 10 \
+    --generate-confusing-view \
+    --seed 0
 ```
 
 | 参数 | 默认值 | 说明 |
@@ -86,6 +93,7 @@ python main.py --mode pcrar \
 | `--leaf-count-max` | 3 | 最大叶节点数 |
 | `--pcrar-rules` | None | 规则过滤（逗号分隔） |
 | `--seed` | None | 随机种子 |
+| `--generate-confusing-view` | False | 生成迷惑性2D视角（用于3D vs 2D对比实验） |
 
 ### 输出格式
 
@@ -219,14 +227,66 @@ ls output_pcrar/
 cat output_pcrar/meta.json | head -50
 ```
 
+## 迷惑性视角生成（新功能）🎯
+
+### 功能说明
+
+为了证明 **3D点云相比2D视角在空间推理任务中的必要性**，我们新增了"迷惑性视角"生成功能。该功能会为每个样本生成一个精心选择的2D视角渲染，该视角会：
+
+- **遮挡关键属性**：使规则的关键变化在2D投影中不可见或模糊
+- **制造视觉歧义**：让多个候选项在2D视角下难以区分
+- **模拟信息损失**：展示2D投影导致的空间信息损失
+
+### 快速使用
+
+```bash
+# 生成带迷惑性视角的数据集
+python main.py --mode pcrar \
+    --output output_comparison \
+    --num-samples 100 \
+    --generate-confusing-view \
+    --seed 0
+
+# 输出结构
+output_comparison/sample_000000/
+├── in_0.ply           # 3D点云
+├── view_in_0.png      # 2D迷惑性视角
+├── cand_*.ply         # 3D候选
+├── view_cand_*.png    # 2D候选视角
+└── meta.json          # 包含视角配置信息
+```
+
+### 迷惑性策略示例
+
+| 规则类型 | 关键属性 | 迷惑性视角 | 迷惑原因 |
+|---------|---------|-----------|---------|
+| Progression(尺寸r) | 整体尺寸变化 | 正面远距离 | 深度压缩，大小变化不明显 |
+| Progression(旋转R) | 绕轴旋转 | 沿旋转轴 | 旋转完全不可见 |
+| Count | 部件数量 | 重叠视角 | 多部件投影重叠，数量难判 |
+| Symmetry | 对称变化 | 非对称轴 | 对称性不可见 |
+
+### 实验设计建议
+
+**对比实验**：在同一数据集上分别测试：
+1. **通用视觉模型**（GPT-4V, Claude等）使用2D迷惑性视角
+2. **3D点云模型**使用完整点云
+
+**预期结果**：2D视角准确率显著低于3D点云，从而证明3D数据的必要性。
+
+详细文档：[CONFUSING_VIEW_GUIDE.md](CONFUSING_VIEW_GUIDE.md)
+
+---
+
 ## 依赖
 
 - Python 3.10+
 - numpy
+- (可选) Pillow - 用于保存2D视角图像
 - (可选) streamlit, pandas - 用于 Web UI
 
 ```bash
 pip install -r requirements.txt
+pip install Pillow  # 如需生成2D视角
 ```
 
 ## 项目结构

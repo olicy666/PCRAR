@@ -63,6 +63,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="PCRAR: Comma-separated rule templates (e.g., Progression,Cycle,Copy). When provided, filters rules.",
     )
+    parser.add_argument(
+        "--generate-confusing-view",
+        action="store_true",
+        help="PCRAR: Generate confusing 2D viewpoint renderings for each sample (for comparison experiments)",
+    )
     return parser.parse_args()
 
 
@@ -89,6 +94,7 @@ def main_pcrar(args: argparse.Namespace) -> None:
         leaf_count_min=args.leaf_count_min,
         leaf_count_max=args.leaf_count_max,
         rule_filter=rule_filter,
+        generate_confusing_view=args.generate_confusing_view,
     )
     
     generator = PCRARDatasetGenerator(config=config, seed=args.seed)
