@@ -173,6 +173,67 @@ class PCRARDatasetGenerator:
             context.append(row)
         return context
 
+    @staticmethod
+    def _summarize_rule_semantics(params: RuleParams) -> Dict[str, Any]:
+        template = params.template
+        axis = params.axis
+        summary = {
+            "template": template.value,
+            "axis": axis,
+            "changed_attribute": "unknown",
+            "description": "fixed rule instance",
+            "direction": int(params.direction),
+        }
+        if template == RuleTemplate.PROGRESSION:
+            attr_map = {"r": "size_level", "R": "global_pose", "p": "slot_position", "d": "density_level"}
+            summary["changed_attribute"] = attr_map.get(axis, "progression_axis")
+            if axis == "R":
+                summary["description"] = f"Progression on global pose (rot_axis={params.rot_axis}, step={params.direction})"
+            else:
+                summary["description"] = f"Progression on {summary['changed_attribute']} (step={params.direction})"
+        elif template == RuleTemplate.CYCLE:
+            summary["changed_attribute"] = "primitive_type"
+            summary["description"] = (
+                f"Cycle over primitive types on leaves={params.leaf_indices if params.leaf_indices is not None else [params.leaf_idx]}"
+            )
+        elif template == RuleTemplate.COPY:
+            summary["changed_attribute"] = axis or "copy_pattern"
+            summary["description"] = f"Copy pattern ({axis}) with direction={params.direction}"
+        elif template == RuleTemplate.COUNT:
+            summary["changed_attribute"] = "leaf_count"
+            summary["description"] = f"Count transition with direction={params.direction}"
+        elif template == RuleTemplate.CONSERVATION:
+            summary["changed_attribute"] = "paired_size_levels"
+            summary["description"] = f"Conservation: leaf{params.leaf_idx} +1 and leaf{params.direction} -1"
+        elif template == RuleTemplate.PERMUTATION:
+            summary["changed_attribute"] = "slot_permutation"
+            summary["description"] = f"Permutation over slots with direction={params.direction}"
+        elif template == RuleTemplate.SYMMETRY:
+            sym_attr_map = {"p": "slot_position", "R": "local_pose", "r": "size_level", "d": "density_level"}
+            summary["changed_attribute"] = sym_attr_map.get(axis, "symmetry_axis")
+            summary["description"] = f"Symmetry on {summary['changed_attribute']}"
+        return summary
+
+    @classmethod
+    def _build_matrix_relation_spec(cls, params: RuleParams, k_h: int, k_v: int) -> Dict[str, Any]:
+        semantics = cls._summarize_rule_semantics(params)
+        return {
+            "formula": "E[r,c] = T^(r*k_v + c*k_h)(E[0,0])",
+            "rule_instance": semantics,
+            "horizontal_relation": {
+                "step_power": int(k_h),
+                "formula": f"E[r,c+1] = T^{int(k_h)}(E[r,c])",
+                "changed_attribute": semantics["changed_attribute"],
+                "description": semantics["description"],
+            },
+            "vertical_relation": {
+                "step_power": int(k_v),
+                "formula": f"E[r+1,c] = T^{int(k_v)}(E[r,c])",
+                "changed_attribute": semantics["changed_attribute"],
+                "description": semantics["description"],
+            },
+        }
+
     def _save_matrix_sample(
         self,
         output_root: Path,
@@ -233,6 +294,7 @@ class PCRARDatasetGenerator:
             "distractor_types": distractor_types,
             "rule_template": rule.template.value,
             "rule_params": params.to_dict(),
+            "matrix_relation": self._build_matrix_relation_spec(params, k_h=k_h, k_v=k_v),
             "k_h": int(k_h),
             "k_v": int(k_v),
             "K_max": int(k_max),

@@ -104,7 +104,7 @@ def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: in
       scene.background = new THREE.Color(0xffffff);
 
       const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 1e9);
-      camera.position.set(0, 0, 5);
+      camera.position.set(4, 3, 6);
 
       const renderer = new THREE.WebGLRenderer({{ antialias: true, powerPreference: "high-performance" }});
       renderer.setPixelRatio(1);
@@ -837,7 +837,8 @@ def render_exam() -> None:
     choice = str(st.session_state[answer_key])
 
     # 构建九宫格合并视图：8个已知格 + 当前选择候选 = 9片点云
-    spacing = 3.2
+    spacing = 2.6
+    row_depth = 0.9
     contents: List[str] = []
     labels: List[str] = []
     offsets: List[List[float]] = []
@@ -850,13 +851,25 @@ def render_exam() -> None:
                 path = grid_paths[r][c]
                 contents.append(load_ply_text(resolve_ply_path(exam_root, path)))
                 labels.append(f"grid[{r},{c}]")
-                offsets.append([float((c - 1) * spacing), float((1 - r) * spacing), 0.0])
+                offsets.append(
+                    [
+                        float((c - 1) * spacing),
+                        float((1 - r) * spacing),
+                        float((1 - r) * row_depth),
+                    ]
+                )
 
     selected_idx = ord(choice) - ord("A")
     if 0 <= selected_idx < len(candidate_paths):
         contents.append(load_ply_text(resolve_ply_path(exam_root, candidate_paths[selected_idx])))
         labels.append(f"target={choice}")
-        offsets.append([float((target_pos[1] - 1) * spacing), float((1 - target_pos[0]) * spacing), 0.0])
+        offsets.append(
+            [
+                float((target_pos[1] - 1) * spacing),
+                float((1 - target_pos[0]) * spacing),
+                float((1 - target_pos[0]) * row_depth),
+            ]
+        )
 
     pl_multi_component(
         contents,
