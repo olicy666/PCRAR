@@ -64,6 +64,7 @@ class PCRARConfig:
     matrix_density_levels: int = 5
     matrix_delta_levels: int = 5
     matrix_slot_levels: Tuple[int, ...] = (-1, 0, 1)
+    matrix_missing_one_per_row: bool = True
     generate_confusing_view: bool = True
     view_image_size: Tuple[int, int] = (512, 512)
     rule_filter: Optional[Set[RuleTemplate]] = None
@@ -157,6 +158,40 @@ class PCRARDatasetGenerator:
             return 3
         return 5
 
+    def _sample_missing_positions(self) -> List[Tuple[int, int]]:
+        target_pos = (2, 2)
+        if not self.config.matrix_missing_one_per_row:
+            return [target_pos]
+        # Keep (2,1) and (1,2) visible because candidate checks depend on them.
+        row0_col = int(self.rng.integers(0, 3))
+        row1_col = int(self.rng.integers(0, 2))
+        return [(0, row0_col), (1, row1_col), target_pos]
+
+    @staticmethod
+    def _normalize_missing_positions(missing_positions: Sequence[Tuple[int, int]]) -> Set[Tuple[int, int]]:
+        missing_set: Set[Tuple[int, int]] = set()
+        for r, c in missing_positions:
+            rr = int(r)
+            cc = int(c)
+            if rr < 0 or rr > 2 or cc < 0 or cc > 2:
+                raise RuntimeError(f"Invalid missing position ({rr}, {cc})")
+            missing_set.add((rr, cc))
+        return missing_set
+
+    @staticmethod
+    def _validate_missing_positions(missing_positions: Set[Tuple[int, int]]) -> None:
+        if (2, 2) not in missing_positions:
+            raise RuntimeError("target position (2,2) must be missing")
+        blocked = {(2, 1), (1, 2)}.intersection(missing_positions)
+        if blocked:
+            raise RuntimeError(
+                f"Missing positions {sorted(blocked)} break target anchors and candidate consistency checks"
+            )
+
+    @staticmethod
+    def _build_observation_mask(missing_positions: Set[Tuple[int, int]]) -> List[List[bool]]:
+        return [[(r, c) not in missing_positions for c in range(3)] for r in range(3)]
+
     def _sample_matrix_problem(
         self,
         k_h: int,
@@ -207,12 +242,18 @@ class PCRARDatasetGenerator:
         raise RuntimeError("Failed to sample a valid 3x3 matrix problem")
 
     @staticmethod
-    def _build_grid_context(grid: List[List[PCRAREntity]]) -> List[List[Optional[PCRAREntity]]]:
+    def _build_grid_context(
+        grid: List[List[PCRAREntity]],
+        missing_positions: Optional[Sequence[Tuple[int, int]]] = None,
+    ) -> List[List[Optional[PCRAREntity]]]:
+        missing_set = {(2, 2)} if not missing_positions else {
+            (int(r), int(c)) for r, c in missing_positions
+        }
         context: List[List[Optional[PCRAREntity]]] = []
         for r in range(3):
             row: List[Optional[PCRAREntity]] = []
             for c in range(3):
-                if (r, c) == (2, 2):
+                if (r, c) in missing_set:
                     row.append(None)
                 else:
                     row.append(grid[r][c].copy())
@@ -340,6 +381,7 @@ class PCRARDatasetGenerator:
         output_root: Path,
         sample_index: int,
         grid: List[List[PCRAREntity]],
+        missing_positions: Sequence[Tuple[int, int]],
         k_h: int,
         k_v: int,
         k_max: int,
@@ -354,12 +396,15 @@ class PCRARDatasetGenerator:
         sample_id = f"sample_{sample_index:06d}"
         sample_dir = output_root / sample_id
         ensure_dir(sample_dir)
+        missing_set = self._normalize_missing_positions(missing_positions)
+        self._validate_missing_positions(missing_set)
+        missing_positions_sorted = sorted(missing_set)
 
         grid_paths: List[List[Optional[str]]] = [[None for _ in range(3)] for _ in range(3)]
         grid_clouds: List[List[Optional[np.ndarray]]] = [[None for _ in range(3)] for _ in range(3)]
         for r in range(3):
             for c in range(3):
-                if (r, c) == (2, 2):
+                if (r, c) in missing_set:
                     continue
                 filename = f"grid_{r}_{c}.ply"
                 path = sample_dir / filename
@@ -388,13 +433,9 @@ class PCRARDatasetGenerator:
             "task_type": "matrix_3x3",
             "focus": "3x3 matrix completion with a fixed rule instance and dual-step strides.",
             "target_position": [2, 2],
-            "missing_positions": [[2, 2]],
-            "empty_grid_positions": [[2, 2]],
-            "grid_observation_mask": [
-                [True, True, True],
-                [True, True, True],
-                [True, True, False],
-            ],
+            "missing_positions": [[r, c] for r, c in missing_positions_sorted],
+            "empty_grid_positions": [[r, c] for r, c in missing_positions_sorted],
+            "grid_observation_mask": self._build_observation_mask(missing_set),
             "grid_paths": grid_paths,
             "candidate_paths": candidate_paths,
             "gt_index": gt_index,
@@ -429,7 +470,7 @@ class PCRARDatasetGenerator:
             entities_for_view: List[PCRAREntity] = []
             for r in range(3):
                 for c in range(3):
-                    if (r, c) == (2, 2):
+                    if (r, c) in missing_set:
                         continue
                     entities_for_view.append(grid[r][c])
             entities_for_view.extend(candidates)
@@ -486,7 +527,10 @@ class PCRARDatasetGenerator:
                 continue
         else:
             raise RuntimeError(f"Failed to sample matrix problem across all k pairs: {last_err}")
-        grid_context = self._build_grid_context(grid)
+        missing_positions = self._sample_missing_positions()
+        missing_set = self._normalize_missing_positions(missing_positions)
+        self._validate_missing_positions(missing_set)
+        grid_context = self._build_grid_context(grid, missing_positions=missing_positions)
         gt_entity = grid[2][2].copy()
 
         cand_payload = generate_candidates(
@@ -525,6 +569,7 @@ class PCRARDatasetGenerator:
             output_root=output_root,
             sample_index=sample_index,
             grid=grid,
+            missing_positions=missing_positions,
             k_h=k_h,
             k_v=k_v,
             k_max=k_max,

@@ -56,6 +56,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--matrix-delta-levels", type=int, default=5, help="PCRAR matrix delta level count")
     parser.add_argument("--matrix-slot-levels", type=str, default="-1,0,1", help="PCRAR matrix slot levels")
     parser.add_argument(
+        "--matrix-missing-one-per-row",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="PCRAR matrix: hide one cell per row (3 missing total, including target at (2,2))",
+    )
+    parser.add_argument(
         "--generate-confusing-view",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -105,6 +111,7 @@ def main_pcrar(args: argparse.Namespace, legacy: bool = False) -> None:
         matrix_density_levels=args.matrix_density_levels,
         matrix_delta_levels=args.matrix_delta_levels,
         matrix_slot_levels=slot_levels,
+        matrix_missing_one_per_row=args.matrix_missing_one_per_row,
         generate_confusing_view=args.generate_confusing_view,
         rule_filter=_parse_rule_filter(args.pcrar_rules),
         legacy_enabled=legacy,

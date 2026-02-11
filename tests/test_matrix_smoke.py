@@ -40,12 +40,24 @@ def _to_candidates(entry: Dict[str, Any]) -> List[PCRAREntity]:
     return [PCRAREntity.from_dict(x) for x in entry["entities"]["candidates"]]
 
 
-def _build_context(grid: List[List[PCRAREntity]]) -> List[List[Optional[PCRAREntity]]]:
+def _build_context(
+    grid: List[List[PCRAREntity]],
+    missing_positions: Optional[List[List[int]]] = None,
+) -> List[List[Optional[PCRAREntity]]]:
+    missing_set = {(2, 2)}
+    if missing_positions:
+        parsed = set()
+        for pos in missing_positions:
+            if not isinstance(pos, (list, tuple)) or len(pos) != 2:
+                continue
+            parsed.add((int(pos[0]), int(pos[1])))
+        if parsed:
+            missing_set = parsed
     ctx: List[List[Optional[PCRAREntity]]] = []
     for r in range(3):
         row: List[Optional[PCRAREntity]] = []
         for c in range(3):
-            if (r, c) == (2, 2):
+            if (r, c) in missing_set:
                 row.append(None)
             else:
                 row.append(grid[r][c].copy())
@@ -83,7 +95,8 @@ def validate_entry(entry: Dict[str, Any]) -> None:
         raise AssertionError(f"Grid quality check failed: {reason}")
 
     # 4) Unique true relation candidate
-    grid_context = _build_context(grid)
+    missing_positions = entry.get("missing_positions") or entry.get("empty_grid_positions")
+    grid_context = _build_context(grid, missing_positions=missing_positions)
     true_hits = [
         i
         for i, cand in enumerate(candidates)

@@ -752,7 +752,7 @@ def render_exam() -> None:
         st.info("请先在侧边栏选择考试模式并生成试卷。")
         st.subheader("考试模式说明")
         st.markdown("""
-        - **题型**: 3x3 九宫格矩阵补全（固定挖空右下角）
+        - **题型**: 3x3 九宫格矩阵补全（目标格固定右下角，可附加缺失格）
         - **规则**: 同一规则实例 T 作用于整张矩阵
         - **步长**: 横向步长 k_h、纵向步长 k_v，按指数公式生成
         - **目标**: 从候选中选出唯一满足真实关系 T 的目标格
@@ -815,19 +815,27 @@ def render_exam() -> None:
     grid_paths = entry.get("grid_paths", [])
     candidate_paths = entry.get("candidate_paths", [])
     target_pos = tuple(entry.get("target_position", [2, 2]))
+    raw_missing = entry.get("missing_positions") or entry.get("empty_grid_positions") or [list(target_pos)]
+    missing_positions = set()
+    for pos in raw_missing:
+        if not isinstance(pos, (list, tuple)) or len(pos) != 2:
+            continue
+        missing_positions.add((int(pos[0]), int(pos[1])))
+    missing_positions.add((int(target_pos[0]), int(target_pos[1])))
+    known_count = 9 - len(missing_positions)
     cand_labels = [chr(ord("A") + i) for i in range(len(candidate_paths))]
     if len(cand_labels) > 4:
         cand_labels = cand_labels[:4]
 
     st.markdown("### 九宫格合并视图")
     reset_nonce = st.session_state.viewer_reset_nonce
-    st.caption("8 个已知格固定在九宫格位置，缺失格由当前选择的候选填入。")
+    st.caption(f"{known_count} 个已知格固定在九宫格位置，缺失格保留空白。")
 
     if not cand_labels:
         st.error("当前题目没有候选项。")
         return
 
-    # 构建九宫格合并视图：仅展示已知8格，缺失格保持空白
+    # 构建九宫格合并视图：仅展示已知格，缺失格保持空白
     spacing = 2.6
     row_depth = 0.9
     contents: List[str] = []
@@ -836,7 +844,7 @@ def render_exam() -> None:
 
     for r in range(3):
         for c in range(3):
-            if (r, c) == target_pos:
+            if (r, c) in missing_positions:
                 continue
             if r < len(grid_paths) and c < len(grid_paths[r]) and grid_paths[r][c]:
                 path = grid_paths[r][c]

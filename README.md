@@ -23,7 +23,7 @@ python main.py --mode pcrar-legacy --output output_legacy --num-samples 10 --see
 - 单题固定一个规则实例 `T = (RuleTemplate + RuleParams)`。
 - 3x3 按指数公式生成：
   - `E[r,c] = T^(r*k_v + c*k_h)(E[0,0])`
-- 目标格固定挖空 `(2,2)`。
+- 目标格固定挖空 `(2,2)`；默认每行再采样一个缺失位（总计 3 个缺失格）。
 - 候选为多选一（默认 4 选 1，可配）。
 
 默认步长：
@@ -50,6 +50,7 @@ python main.py --mode pcrar \
   --matrix-density-levels 5 \
   --matrix-delta-levels 5 \
   --matrix-slot-levels -1,0,1 \
+  --matrix-missing-one-per-row \
   --pcrar-rules Progression,Cycle,Copy \
   --seed 0
 ```
@@ -63,6 +64,9 @@ python main.py --mode pcrar \
 
 ```bash
 python main.py --mode pcrar --no-generate-confusing-view --output output_matrix --num-samples 10
+
+# 若要回退到仅挖空目标格 (2,2)
+python main.py --mode pcrar --no-matrix-missing-one-per-row --output output_matrix --num-samples 10
 ```
 
 ## 输出格式（新标准）
@@ -87,8 +91,10 @@ output_matrix/
 ```json
 {
   "task_type": "matrix_3x3",
-  "grid_paths": [["...", "...", "..."], ["...", "...", "..."], ["...", "...", null]],
+  "grid_paths": [["...", null, "..."], [null, "...", "..."], ["...", "...", null]],
   "target_position": [2, 2],
+  "missing_positions": [[0, 1], [1, 0], [2, 2]],
+  "grid_observation_mask": [[true, false, true], [false, true, true], [true, true, false]],
   "rule_template": "Progression",
   "rule_params": {"template": "Progression", "axis": "r", "direction": 1},
   "k_h": 2,
