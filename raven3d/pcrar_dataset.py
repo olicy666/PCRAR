@@ -214,12 +214,67 @@ class PCRARDatasetGenerator:
             summary["description"] = f"Symmetry on {summary['changed_attribute']}"
         return summary
 
+    @staticmethod
+    def _build_attribute_change_detail(params: RuleParams, k_h: int, k_v: int) -> Dict[str, Any]:
+        template = params.template
+        axis = params.axis
+        detail: Dict[str, Any] = {
+            "template": template.value,
+            "axis": axis,
+            "per_T_change": {},
+            "horizontal_effective_change": {},
+            "vertical_effective_change": {},
+        }
+        if template == RuleTemplate.PROGRESSION:
+            if axis == "r":
+                detail["per_T_change"] = {"attribute": "size_level", "step": int(params.direction)}
+            elif axis == "R":
+                detail["per_T_change"] = {
+                    "attribute": f"global_pose_deg.{(params.rot_axis or 'x').lower()}",
+                    "step_degrees": int(params.direction * 60),
+                }
+            elif axis == "p":
+                detail["per_T_change"] = {"attribute": "slot", "step": int(params.direction)}
+            elif axis == "d":
+                detail["per_T_change"] = {"attribute": "density_preset_idx", "step": int(params.direction)}
+        elif template == RuleTemplate.CYCLE:
+            detail["per_T_change"] = {
+                "attribute": "primitive_type",
+                "leaf_indices": params.leaf_indices if params.leaf_indices is not None else [params.leaf_idx],
+                "directions": params.directions if params.directions is not None else [params.direction],
+            }
+        elif template == RuleTemplate.COPY:
+            detail["per_T_change"] = {"attribute": params.axis, "direction": int(params.direction)}
+        elif template == RuleTemplate.COUNT:
+            detail["per_T_change"] = {
+                "attribute": "leaf_count",
+                "direction": int(params.direction),
+                "cycle": "1->2->3->1 (direction=+1) or reverse (direction=-1)",
+            }
+        elif template == RuleTemplate.CONSERVATION:
+            detail["per_T_change"] = {
+                "attribute": "paired_size_levels",
+                "plus_leaf": int(params.leaf_idx) if params.leaf_idx is not None else None,
+                "minus_leaf": int(params.direction) if params.direction is not None else None,
+                "plus_step": 1,
+                "minus_step": -1,
+            }
+        elif template == RuleTemplate.PERMUTATION:
+            detail["per_T_change"] = {"attribute": "slot_permutation", "direction": int(params.direction)}
+        elif template == RuleTemplate.SYMMETRY:
+            detail["per_T_change"] = {"attribute": axis, "direction_or_pair": int(params.direction)}
+
+        detail["horizontal_effective_change"] = {"applied_power": int(k_h)}
+        detail["vertical_effective_change"] = {"applied_power": int(k_v)}
+        return detail
+
     @classmethod
     def _build_matrix_relation_spec(cls, params: RuleParams, k_h: int, k_v: int) -> Dict[str, Any]:
         semantics = cls._summarize_rule_semantics(params)
         return {
             "formula": "E[r,c] = T^(r*k_v + c*k_h)(E[0,0])",
             "rule_instance": semantics,
+            "attribute_change_detail": cls._build_attribute_change_detail(params, k_h=k_h, k_v=k_v),
             "horizontal_relation": {
                 "step_power": int(k_h),
                 "formula": f"E[r,c+1] = T^{int(k_h)}(E[r,c])",
@@ -287,6 +342,13 @@ class PCRARDatasetGenerator:
             "task_type": "matrix_3x3",
             "focus": "3x3 matrix completion with a fixed rule instance and dual-step strides.",
             "target_position": [2, 2],
+            "missing_positions": [[2, 2]],
+            "empty_grid_positions": [[2, 2]],
+            "grid_observation_mask": [
+                [True, True, True],
+                [True, True, True],
+                [True, True, False],
+            ],
             "grid_paths": grid_paths,
             "candidate_paths": candidate_paths,
             "gt_index": gt_index,

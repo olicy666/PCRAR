@@ -827,16 +827,7 @@ def render_exam() -> None:
         st.error("当前题目没有候选项。")
         return
 
-    options = cand_labels[:4]
-    answer_key = f"answer_{idx}"
-    current_answer = st.session_state.answers.get(idx, st.session_state.get(answer_key, options[0]))
-    if current_answer not in options:
-        current_answer = options[0]
-    if answer_key not in st.session_state:
-        st.session_state[answer_key] = current_answer
-    choice = str(st.session_state[answer_key])
-
-    # 构建九宫格合并视图：8个已知格 + 当前选择候选 = 9片点云
+    # 构建九宫格合并视图：仅展示已知8格，缺失格保持空白
     spacing = 2.6
     row_depth = 0.9
     contents: List[str] = []
@@ -858,18 +849,6 @@ def render_exam() -> None:
                         float((1 - r) * row_depth),
                     ]
                 )
-
-    selected_idx = ord(choice) - ord("A")
-    if 0 <= selected_idx < len(candidate_paths):
-        contents.append(load_ply_text(resolve_ply_path(exam_root, candidate_paths[selected_idx])))
-        labels.append(f"target={choice}")
-        offsets.append(
-            [
-                float((target_pos[1] - 1) * spacing),
-                float((1 - target_pos[0]) * spacing),
-                float((1 - target_pos[0]) * row_depth),
-            ]
-        )
 
     pl_multi_component(
         contents,
@@ -893,10 +872,17 @@ def render_exam() -> None:
             else:
                 st.info("空")
 
+    options = cand_labels[:4]
+    answer_key = f"answer_{idx}"
+    current_answer = st.session_state.answers.get(idx, st.session_state.get(answer_key, options[0]))
+    if current_answer not in options:
+        current_answer = options[0]
+    if answer_key not in st.session_state:
+        st.session_state[answer_key] = current_answer
     choice = st.radio(
         "选择答案",
         options,
-        index=options.index(choice),
+        index=options.index(st.session_state[answer_key]),
         key=answer_key,
         horizontal=True,
     )
