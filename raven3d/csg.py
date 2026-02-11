@@ -32,30 +32,42 @@ class OpType(str, Enum):
 
 class SizeLevel(str, Enum):
     """尺寸离散档位"""
+    XS = "XS"
     S = "S"
+    SM = "SM"
     M = "M"
+    ML = "ML"
     L = "L"
+    XL = "XL"
 
 
 class DeltaLevel(str, Enum):
     """位置 delta 离散档位"""
+    VNEAR = "VeryNear"
     NEAR = "Near"
     MID = "Mid"
     FAR = "Far"
+    VFAR = "VeryFar"
 
 
 # 尺寸档位映射到 scale 值
 SIZE_LEVEL_MAP: Dict[SizeLevel, float] = {
+    SizeLevel.XS: 0.50,
     SizeLevel.S: 2.0 / 3.0,
+    SizeLevel.SM: 5.0 / 6.0,
     SizeLevel.M: 1.0,
+    SizeLevel.ML: 1.25,
     SizeLevel.L: 1.5,
+    SizeLevel.XL: 1.8,
 }
 
 # Delta 档位映射到“单步位移占模型宽度比例”
 DELTA_LEVEL_MAP: Dict[DeltaLevel, float] = {
+    DeltaLevel.VNEAR: 0.15,
     DeltaLevel.NEAR: 0.25,
     DeltaLevel.MID: 0.50,
     DeltaLevel.FAR: 0.75,
+    DeltaLevel.VFAR: 0.90,
 }
 
 # 离散角度列表（度）

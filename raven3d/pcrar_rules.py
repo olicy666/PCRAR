@@ -23,9 +23,9 @@ from .pcrar_entity import (
 
 
 # 尺寸档位列表（用于 Progression）
-SIZE_LEVELS = [SizeLevel.S, SizeLevel.M, SizeLevel.L]
+SIZE_LEVELS = list(SizeLevel)
 # Delta 档位列表
-DELTA_LEVELS = [DeltaLevel.NEAR, DeltaLevel.MID, DeltaLevel.FAR]
+DELTA_LEVELS = list(DeltaLevel)
 # 槽位列表
 SLOTS = [-1, 0, 1]
 

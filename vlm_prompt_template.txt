@@ -1,0 +1,24 @@
+You are given a visual reasoning task. Observe the reference images and identify the underlying rule or pattern, then select the correct answer from the candidates.
+
+**Task Type**: {task_type}
+
+**Instructions**:
+- For Relational Reasoning (2→1): Observe ref1 and ref2 to identify the transformation rule T such that ref2 = T(ref1). Then select which candidate follows the same rule when applied to ref2.
+- For Analogical Reasoning (3→1): Observe ref1, ref2, and ref3. Identify the transformation rule T such that ref2 = T(ref1). Then select which candidate represents T(ref3).
+- For Matrix Reasoning (3x3): Observe the known 8 cells in the 3x3 matrix and infer the single consistent rule instance T (with row/column step sizes). Then choose the candidate that correctly fills the missing bottom-right cell.
+
+**Your Task**:
+1. Carefully observe the known context images (refs or matrix cells)
+2. Identify the pattern or transformation rule
+3. Apply the same rule to select the correct answer
+4. Choose from options: A, B, C, or D
+
+**Important Notes**:
+- Focus on spatial relationships, geometric properties, and transformations
+- Consider: size, position, rotation, shape, and part count
+- The images show 3D point clouds from a specific viewpoint
+- Some spatial information may be partially occluded in this 2D projection
+
+Please provide your answer in the following format:
+Answer: [A/B/C/D]
+Reasoning: [Brief explanation of the pattern you identified]

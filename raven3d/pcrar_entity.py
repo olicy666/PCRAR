@@ -26,7 +26,8 @@ DEFAULT_BOUNDARY_SAMPLES = 8
 DEFAULT_MAX_ITERATIONS = 20
 
 # 密度离散档（总点数档位，leaf 均分）
-DENSITY_POINT_PRESETS = [8192, 6144, 4096]
+# 默认扩展为 5 档，用于 matrix 题型。
+DENSITY_POINT_PRESETS = [10240, 9216, 8192, 7168, 6144]
 
 # 兼容历史接口：密度权重按均分处理
 DENSITY_PRESETS_1 = [[1.0], [1.0], [1.0]]
