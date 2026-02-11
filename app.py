@@ -827,6 +827,20 @@ def render_exam() -> None:
         st.error("当前题目没有候选项。")
         return
 
+    st.markdown("### 4个选项点云")
+    cand_cols = st.columns(4)
+    for i in range(4):
+        with cand_cols[i]:
+            label = chr(ord("A") + i)
+            st.caption(f"选项 {label}")
+            if i < len(candidate_paths):
+                pl_component(
+                    load_ply_text(resolve_ply_path(exam_root, candidate_paths[i])),
+                    reset_nonce=reset_nonce,
+                )
+            else:
+                st.info("空")
+
     options = cand_labels[:4]
     current_answer = st.session_state.answers.get(idx, options[0])
     if current_answer not in options:
