@@ -827,35 +827,14 @@ def render_exam() -> None:
         st.error("当前题目没有候选项。")
         return
 
-    st.markdown("### 4个选项点云")
-    cand_cols = st.columns(4)
-    for i in range(4):
-        with cand_cols[i]:
-            label = chr(ord("A") + i)
-            st.caption(f"选项 {label}")
-            if i < len(candidate_paths):
-                pl_component(
-                    load_ply_text(resolve_ply_path(exam_root, candidate_paths[i])),
-                    reset_nonce=reset_nonce,
-                )
-            else:
-                st.info("空")
-
     options = cand_labels[:4]
-    current_answer = st.session_state.answers.get(idx, options[0])
+    answer_key = f"answer_{idx}"
+    current_answer = st.session_state.answers.get(idx, st.session_state.get(answer_key, options[0]))
     if current_answer not in options:
         current_answer = options[0]
-    answer_key = f"answer_{idx}"
     if answer_key not in st.session_state:
         st.session_state[answer_key] = current_answer
-    choice = st.radio(
-        "选择答案",
-        options,
-        index=options.index(st.session_state[answer_key]),
-        key=answer_key,
-        horizontal=True,
-    )
-    st.session_state.answers[idx] = choice
+    choice = str(st.session_state[answer_key])
 
     # 构建九宫格合并视图：8个已知格 + 当前选择候选 = 9片点云
     spacing = 3.2
@@ -886,6 +865,29 @@ def render_exam() -> None:
         height=BIG_PLY_HEIGHT,
         reset_nonce=reset_nonce,
     )
+
+    st.markdown("### 4个选项点云")
+    cand_cols = st.columns(4)
+    for i in range(4):
+        with cand_cols[i]:
+            label = chr(ord("A") + i)
+            st.caption(f"选项 {label}")
+            if i < len(candidate_paths):
+                pl_component(
+                    load_ply_text(resolve_ply_path(exam_root, candidate_paths[i])),
+                    reset_nonce=reset_nonce,
+                )
+            else:
+                st.info("空")
+
+    choice = st.radio(
+        "选择答案",
+        options,
+        index=options.index(choice),
+        key=answer_key,
+        horizontal=True,
+    )
+    st.session_state.answers[idx] = choice
 
     nav_cols = st.columns(3)
     with nav_cols[0]:
