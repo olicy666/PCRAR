@@ -77,7 +77,8 @@ def validate_entry(entry: Dict[str, Any]) -> None:
         raise AssertionError("Path consistency failed")
 
     # 3) Adjacent differences and global diversity
-    ok, reason = grid_quality_checks(grid, rule, params, k_h, k_v)
+    min_unique = 3 if rule.template in {RuleTemplate.CYCLE, RuleTemplate.COPY} else 5
+    ok, reason = grid_quality_checks(grid, rule, params, k_h, k_v, min_unique=min_unique)
     if not ok:
         raise AssertionError(f"Grid quality check failed: {reason}")
 

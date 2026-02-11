@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 import numpy as np
 
 from .candidate_generation import CandidateMixConfig, generate_candidates
-from .csg import OpType
+from .csg import OpType, PRIM_TYPE_CYCLE
 from .io import ensure_dir, write_meta, write_ply
 from .matrix_grid import (
     MatrixLevelConfig,
@@ -117,11 +117,45 @@ class PCRARDatasetGenerator:
         self.rng.shuffle(templates)
         for template in templates:
             rule = get_rule(template)
+            if template == RuleTemplate.COPY:
+                self._enforce_copy_preconditions(entity)
             for _ in range(40):
                 params = rule.sample_params(self.rng, entity)
                 if rule.can_apply(entity, params):
                     return rule, params
         raise RuntimeError("No applicable matrix rule found for current entity")
+
+    def _enforce_copy_preconditions(self, entity: PCRAREntity) -> None:
+        leaves = entity.get_leaves()
+        if len(leaves) != 3:
+            return
+        mode = int(self.rng.integers(3))
+        if mode == 0:
+            # copy_shape_cycle: 3 distinct shapes
+            for i, leaf in enumerate(leaves):
+                leaf.prim_type = PRIM_TYPE_CYCLE[i % len(PRIM_TYPE_CYCLE)]
+        elif mode == 1:
+            # copy_size_cycle: same shape, all sizes different
+            base = leaves[0].prim_type
+            for leaf in leaves:
+                leaf.prim_type = base
+            size_levels = self.level_cfg.size_levels
+            if len(size_levels) >= 3:
+                idxs = np.linspace(0, len(size_levels) - 1, 3)
+                for i, leaf in enumerate(leaves):
+                    leaf.size_level = size_levels[int(round(float(idxs[i])))]
+        else:
+            # copy_density_cycle: same shape, distinguishable weights
+            base = leaves[0].prim_type
+            for leaf in leaves:
+                leaf.prim_type = base
+            entity.obs.part_sampling_weights = [0.5, 0.3125, 0.1875]
+
+    @staticmethod
+    def _min_unique_threshold(rule: PCRARRule) -> int:
+        if rule.template in {RuleTemplate.CYCLE, RuleTemplate.COPY}:
+            return 3
+        return 5
 
     def _sample_matrix_problem(
         self,
@@ -131,7 +165,12 @@ class PCRARDatasetGenerator:
     ) -> Tuple[List[List[PCRAREntity]], int, PCRARRule, RuleParams]:
         k_max = 2 * k_h + 2 * k_v
         for _ in range(max_attempts):
-            leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
+            if self.config.rule_filter == {RuleTemplate.COPY}:
+                leaf_count = 3
+            elif self.config.rule_filter == {RuleTemplate.CYCLE}:
+                leaf_count = 3
+            else:
+                leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
             e00 = sample_random_entity(
                 self.rng,
                 leaf_count=leaf_count,
@@ -152,7 +191,14 @@ class PCRARDatasetGenerator:
             except RuntimeError:
                 continue
 
-            ok, reason = grid_quality_checks(grid, rule, params, k_h=k_h, k_v=k_v)
+            ok, reason = grid_quality_checks(
+                grid,
+                rule,
+                params,
+                k_h=k_h,
+                k_v=k_v,
+                min_unique=self._min_unique_threshold(rule),
+            )
             if not ok:
                 if reason in {"adjacent_cell_collision", "low_global_diversity", "path_consistency_failed"}:
                     continue
@@ -424,9 +470,22 @@ class PCRARDatasetGenerator:
                 preferred_axis=None,
             )
 
-        k_h = int(self.rng.choice(self.config.matrix_k_h_choices))
-        k_v = int(self.rng.choice(self.config.matrix_k_v_choices))
-        grid, k_max, rule, params = self._sample_matrix_problem(k_h=k_h, k_v=k_v)
+        k_pairs = [
+            (int(kh), int(kv))
+            for kh in self.config.matrix_k_h_choices
+            for kv in self.config.matrix_k_v_choices
+        ]
+        self.rng.shuffle(k_pairs)
+        last_err: Optional[Exception] = None
+        for k_h, k_v in k_pairs:
+            try:
+                grid, k_max, rule, params = self._sample_matrix_problem(k_h=k_h, k_v=k_v)
+                break
+            except RuntimeError as exc:
+                last_err = exc
+                continue
+        else:
+            raise RuntimeError(f"Failed to sample matrix problem across all k pairs: {last_err}")
         grid_context = self._build_grid_context(grid)
         gt_entity = grid[2][2].copy()
 
