@@ -810,110 +810,27 @@ def render_exam() -> None:
             st.session_state.viewer_reset_nonce += 1
             st.rerun()
     with control_cols[1]:
-        show_big_view = st.checkbox("大视图", key="show_big_view")
+        st.caption("九宫格合并视图")
 
     grid_paths = entry.get("grid_paths", [])
     candidate_paths = entry.get("candidate_paths", [])
     target_pos = tuple(entry.get("target_position", [2, 2]))
-
-    # 显示矩阵已知格
-    st.markdown("### 3x3矩阵（右下角为待预测）")
-    reset_nonce = st.session_state.viewer_reset_nonce
-    for r in range(3):
-        row_cols = st.columns(3)
-        for c in range(3):
-            with row_cols[c]:
-                st.caption(f"grid[{r},{c}]")
-                if (r, c) == target_pos:
-                    st.info("Missing")
-                    continue
-                path = None
-                if r < len(grid_paths) and c < len(grid_paths[r]):
-                    path = grid_paths[r][c]
-                if path:
-                    pl_component(
-                        load_ply_text(resolve_ply_path(exam_root, path)),
-                        reset_nonce=reset_nonce,
-                    )
-                else:
-                    st.warning("路径缺失")
-
-    if show_big_view:
-        st.markdown("### 合并点云视图")
-        grid_labels = []
-        for r in range(3):
-            for c in range(3):
-                if (r, c) != target_pos:
-                    grid_labels.append(f"grid[{r},{c}]")
-        cand_labels = [chr(ord("A") + i) for i in range(len(candidate_paths))]
-        view_options = grid_labels + cand_labels
-        
-        selected = []
-        cols = st.columns(len(view_options))
-        for col, label in zip(cols, view_options):
-            key = f"big_view_{label}"
-            default = label in st.session_state.big_view_selection
-            with col:
-                checked = st.checkbox(label, key=key, value=default)
-            if checked:
-                selected.append(label)
-        st.session_state.big_view_selection = selected
-        
-        # 构建路径映射
-        label_to_path = {}
-        label_to_offset: Dict[str, List[float]] = {}
-        spacing = 3.2
-        for r in range(3):
-            for c in range(3):
-                if (r, c) == target_pos:
-                    continue
-                if r < len(grid_paths) and c < len(grid_paths[r]) and grid_paths[r][c]:
-                    label = f"grid[{r},{c}]"
-                    label_to_path[label] = grid_paths[r][c]
-                    label_to_offset[label] = [
-                        float((c - 1) * spacing),
-                        float((1 - r) * spacing),
-                        0.0,
-                    ]
-        cand_count = max(1, len(candidate_paths))
-        for i, path in enumerate(candidate_paths):
-            label = chr(65 + i)
-            label_to_path[label] = path
-            label_to_offset[label] = [
-                float((i - (cand_count - 1) / 2.0) * spacing),
-                float(-2.3 * spacing),
-                0.0,
-            ]
-        
-        if not selected:
-            st.info("请选择要显示的点云。")
-        else:
-            contents = []
-            offsets = []
-            for label in selected:
-                path = label_to_path.get(label, "")
-                if path:
-                    contents.append(load_ply_text(resolve_ply_path(exam_root, path)))
-                    offsets.append(label_to_offset.get(label, [0.0, 0.0, 0.0]))
-            if contents:
-                pl_multi_component(contents, selected, offsets=offsets, reset_nonce=reset_nonce)
-
-    # 显示候选点云
-    st.markdown("### 候选答案")
-    cand_cols = st.columns(max(1, len(candidate_paths)))
     cand_labels = [chr(ord("A") + i) for i in range(len(candidate_paths))]
-    
-    for i, (col, label) in enumerate(zip(cand_cols, cand_labels)):
-        if i < len(candidate_paths):
-            with col:
-                st.caption(f"选项 {label}")
-                pl_component(
-                    load_ply_text(resolve_ply_path(exam_root, candidate_paths[i])),
-                    reset_nonce=reset_nonce,
-                )
+    if len(cand_labels) > 4:
+        cand_labels = cand_labels[:4]
 
-    options = ["未作答"] + cand_labels
-    current_answer = st.session_state.answers.get(idx, "未作答")
+    st.markdown("### 九宫格合并视图")
+    reset_nonce = st.session_state.viewer_reset_nonce
+    st.caption("8 个已知格固定在九宫格位置，缺失格由当前选择的候选填入。")
+
+    if not cand_labels:
+        st.error("当前题目没有候选项。")
+        return
+
+    options = cand_labels[:4]
+    current_answer = st.session_state.answers.get(idx, options[0])
+    if current_answer not in options:
+        current_answer = options[0]
     answer_key = f"answer_{idx}"
     if answer_key not in st.session_state:
         st.session_state[answer_key] = current_answer
@@ -924,10 +841,37 @@ def render_exam() -> None:
         key=answer_key,
         horizontal=True,
     )
-    if choice == "未作答":
-        st.session_state.answers.pop(idx, None)
-    else:
-        st.session_state.answers[idx] = choice
+    st.session_state.answers[idx] = choice
+
+    # 构建九宫格合并视图：8个已知格 + 当前选择候选 = 9片点云
+    spacing = 3.2
+    contents: List[str] = []
+    labels: List[str] = []
+    offsets: List[List[float]] = []
+
+    for r in range(3):
+        for c in range(3):
+            if (r, c) == target_pos:
+                continue
+            if r < len(grid_paths) and c < len(grid_paths[r]) and grid_paths[r][c]:
+                path = grid_paths[r][c]
+                contents.append(load_ply_text(resolve_ply_path(exam_root, path)))
+                labels.append(f"grid[{r},{c}]")
+                offsets.append([float((c - 1) * spacing), float((1 - r) * spacing), 0.0])
+
+    selected_idx = ord(choice) - ord("A")
+    if 0 <= selected_idx < len(candidate_paths):
+        contents.append(load_ply_text(resolve_ply_path(exam_root, candidate_paths[selected_idx])))
+        labels.append(f"target={choice}")
+        offsets.append([float((target_pos[1] - 1) * spacing), float((1 - target_pos[0]) * spacing), 0.0])
+
+    pl_multi_component(
+        contents,
+        labels,
+        offsets=offsets,
+        height=BIG_PLY_HEIGHT,
+        reset_nonce=reset_nonce,
+    )
 
     nav_cols = st.columns(3)
     with nav_cols[0]:
