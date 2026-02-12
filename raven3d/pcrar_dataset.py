@@ -154,7 +154,7 @@ class PCRARDatasetGenerator:
 
     @staticmethod
     def _min_unique_threshold(rule: PCRARRule) -> int:
-        if rule.template in {RuleTemplate.CYCLE, RuleTemplate.COPY}:
+        if rule.template in {RuleTemplate.CYCLE, RuleTemplate.COPY, RuleTemplate.PERMUTATION}:
             return 3
         return 5
 
@@ -203,6 +203,8 @@ class PCRARDatasetGenerator:
             if self.config.rule_filter == {RuleTemplate.COPY}:
                 leaf_count = 3
             elif self.config.rule_filter == {RuleTemplate.CYCLE}:
+                leaf_count = 3
+            elif self.config.rule_filter == {RuleTemplate.PERMUTATION}:
                 leaf_count = 3
             else:
                 leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
