@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 import numpy as np
 
 from .candidate_generation import CandidateMixConfig, generate_candidates
-from .csg import OpType, PRIM_TYPE_CYCLE
+from .csg import OpType, PRIM_TYPE_CYCLE, enforce_leaf_separation, has_containment_risk, has_excessive_overlap
 from .io import ensure_dir, write_meta, write_ply
 from .matrix_grid import (
     MatrixLevelConfig,
@@ -158,6 +158,19 @@ class PCRARDatasetGenerator:
             return 3
         return 5
 
+    @staticmethod
+    def _entity_visibility_ok(entity: PCRAREntity) -> bool:
+        leaves = entity.get_leaves()
+        return not has_containment_risk(leaves) and not has_excessive_overlap(leaves)
+
+    @classmethod
+    def _grid_visibility_ok(cls, grid: List[List[PCRAREntity]]) -> bool:
+        for row in grid:
+            for entity in row:
+                if not cls._entity_visibility_ok(entity):
+                    return False
+        return True
+
     def _sample_missing_positions(self) -> List[Tuple[int, int]]:
         target_pos = (2, 2)
         if not self.config.matrix_missing_one_per_row:
@@ -214,18 +227,25 @@ class PCRARDatasetGenerator:
                 allowed_ops=self.config.allowed_ops,
             )
             e00 = normalize_entity_levels(e00, self.level_cfg, self.rng)
+            # 归一化后再次拉开部件，避免出现完全包裹/严重重叠。
+            enforce_leaf_separation(e00.get_leaves())
             try:
                 rule, params = self._sample_matrix_rule(e00)
             except RuntimeError:
                 continue
 
             e00 = prepare_entity_for_rule_path(e00, rule, params, self.level_cfg)
+            if not self._entity_visibility_ok(e00):
+                continue
             if not can_apply_k(e00, rule, params, k_max):
                 continue
 
             try:
                 grid, _, _ = generate_grid(e00, rule, params, k_h=k_h, k_v=k_v)
             except RuntimeError:
+                continue
+
+            if not self._grid_visibility_ok(grid):
                 continue
 
             ok, reason = grid_quality_checks(
@@ -684,6 +704,8 @@ class PCRARDatasetGenerator:
         )
 
         candidates = cand_payload["candidates"]
+        if not all(self._entity_visibility_ok(cand) for cand in candidates):
+            raise RuntimeError("candidate_visibility_failed")
         gt_index = int(cand_payload["gt_index"]) if correct_idx is None else int(correct_idx)
 
         if correct_idx is not None and gt_index != int(correct_idx):
