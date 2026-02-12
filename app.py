@@ -452,6 +452,8 @@ def reset_exam_state() -> None:
         st.session_state.pop(f"big_view_{label}", None)
     for idx in range(TOTAL_QUESTIONS):
         st.session_state.pop(f"answer_{idx}", None)
+        for label in ["A", "B", "C", "D"]:
+            st.session_state.pop(f"merge_candidate_{idx}_{label}", None)
 
 
 def generate_exam(username: str, mode: str) -> None:
@@ -835,24 +837,20 @@ def render_exam() -> None:
         st.error("当前题目没有候选项。")
         return
 
-    merge_toggle_key = f"merge_candidate_in_big_view_{idx}"
-    merge_choice_key = f"merge_candidate_choice_{idx}"
-    if st.session_state.get(merge_choice_key) not in cand_labels:
-        st.session_state[merge_choice_key] = cand_labels[0]
-
-    merge_candidate_in_big_view = st.toggle(
-        "将候选项并入合并大视图",
-        key=merge_toggle_key,
-        help="开启后可将 1 个候选项放到缺失格位置（同一时刻只能选择一个）。",
-    )
     selected_merge_candidate = None
-    if merge_candidate_in_big_view:
-        selected_merge_candidate = st.radio(
-            "并入大视图的选项（单选）",
-            cand_labels,
-            key=merge_choice_key,
-            horizontal=True,
-        )
+    st.caption("候选项并入合并视图（默认全关，可不选；同一时刻仅支持 1 个）")
+    merge_toggle_cols = st.columns(4)
+    enabled_candidates: List[str] = []
+    for i, label in enumerate(cand_labels):
+        with merge_toggle_cols[i]:
+            toggle_key = f"merge_candidate_{idx}_{label}"
+            if st.toggle(f"并入{label}", key=toggle_key):
+                enabled_candidates.append(label)
+
+    if len(enabled_candidates) == 1:
+        selected_merge_candidate = enabled_candidates[0]
+    elif len(enabled_candidates) > 1:
+        st.warning("当前同时开启了多个候选项；同一时刻只能并入 1 个，请仅保留一个开关。")
 
     # 构建九宫格合并视图：仅展示已知格，缺失格保持空白
     spacing = 2.6
