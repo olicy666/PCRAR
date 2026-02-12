@@ -58,9 +58,8 @@ def parse_mode(mode: str) -> RuleTemplate:
 def get_mode_description(mode: str) -> str:
     """获取模式描述"""
     template = parse_mode(mode)
-    task_name = TASK_TYPE_NAMES["matrix_3x3"]
     rule_name = RULE_NAMES[template]
-    return f"{task_name} - {rule_name} ({template.value})"
+    return f"{rule_name} ({template.value})"
 
 MODE_IDS = generate_mode_list()
 RECORD_COLUMNS = ["username", "mode", "score", "total", "accuracy", "reason", "result_path"]
