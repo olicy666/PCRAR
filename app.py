@@ -20,9 +20,12 @@ RECORDS_PATH = Path("exam_records.csv")
 RESULTS_DIR = Path("results")
 TOTAL_QUESTIONS = 20
 PLY_HEIGHT = 320
-BIG_PLY_HEIGHT = 560
+BIG_PLY_HEIGHT = 720
 POINTS_PER_CLOUD = 8192
 BIG_VIEW_POINT_SIZE_SCALE = 6.0
+BIG_VIEW_GRID_SPACING = 4.2
+BIG_VIEW_ROW_DEPTH = 1.8
+BIG_VIEW_CAMERA_FIT_MARGIN = 1.0
 
 # 规则名称映射
 RULE_NAMES = {
@@ -137,7 +140,7 @@ def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: in
 
         const fov = THREE.MathUtils.degToRad(camera.fov);
         let dist = radius / Math.tan(fov / 2);
-        dist *= 1.15;
+        dist *= {BIG_VIEW_CAMERA_FIT_MARGIN};
 
         const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
         if (dir.lengthSq() < 1e-12) dir.set(0, 0, 1);
@@ -146,8 +149,8 @@ def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: in
         camera.far = Math.max(dist * 1000, camera.near + 1);
         camera.updateProjectionMatrix();
 
-        controls.minDistance = dist * 0.85;
-        controls.maxDistance = dist * 1.35;
+        controls.minDistance = dist * 0.35;
+        controls.maxDistance = dist * 4.0;
 
         const sizeVal = Math.max(radius * 0.002, 0.001) * 3.0;
         material.size = sizeVal;
@@ -851,8 +854,8 @@ def render_exam() -> None:
         st.warning("当前同时开启了多个候选项；同一时刻只能并入 1 个，请仅保留一个开关。")
 
     # 构建九宫格合并视图：仅展示已知格，缺失格保持空白
-    spacing = 2.6
-    row_depth = 0.9
+    spacing = BIG_VIEW_GRID_SPACING
+    row_depth = BIG_VIEW_ROW_DEPTH
     contents: List[str] = []
     labels: List[str] = []
     offsets: List[List[float]] = []
