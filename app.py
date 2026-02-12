@@ -831,20 +831,18 @@ def render_exam() -> None:
 
     st.markdown("### 九宫格合并视图")
     reset_nonce = st.session_state.viewer_reset_nonce
-    st.caption(f"{known_count} 个已知格固定在九宫格位置，缺失格保留空白。")
 
     if not cand_labels:
         st.error("当前题目没有候选项。")
         return
 
     selected_merge_candidate = None
-    st.caption("候选项并入合并视图（默认全关，可不选；同一时刻仅支持 1 个）")
     merge_toggle_cols = st.columns(4)
     enabled_candidates: List[str] = []
     for i, label in enumerate(cand_labels):
         with merge_toggle_cols[i]:
             toggle_key = f"merge_candidate_{idx}_{label}"
-            if st.toggle(f"并入{label}", key=toggle_key):
+            if st.toggle(label, key=toggle_key):
                 enabled_candidates.append(label)
 
     if len(enabled_candidates) == 1:
