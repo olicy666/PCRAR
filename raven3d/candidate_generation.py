@@ -29,6 +29,10 @@ def _is_duplicate(entity: PCRAREntity, pool: Sequence[PCRAREntity]) -> bool:
     return any(entities_equal(entity, other, check_obs=True) for other in pool)
 
 
+def _is_structure_duplicate(entity: PCRAREntity, pool: Sequence[PCRAREntity]) -> bool:
+    return any(entities_equal(entity, other, check_obs=False) for other in pool)
+
+
 def _neighbor_index(idx: int, n: int, direction: int = 1) -> int:
     nxt = idx + direction
     if nxt < 0:
@@ -193,6 +197,7 @@ def generate_candidates(
     candidate_types: List[str] = []
     distractor_notes: List[str] = []
     alt_specs: List[Dict[str, Any]] = []
+    enforce_structure_diversity = true_rule.template == RuleTemplate.PERMUTATION
 
     # 1) analogical-but-wrong-relation
     analogical_added = 0
@@ -213,6 +218,11 @@ def generate_candidates(
             continue
         cand, alt_rule, alt_params = sampled
         if _is_duplicate(cand, candidates):
+            continue
+        if enforce_structure_diversity and (
+            entities_equal(cand, gt_entity, check_obs=False)
+            or _is_structure_duplicate(cand, candidates)
+        ):
             continue
         candidates.append(cand)
         candidate_types.append("analogical_wrong_relation")
@@ -236,6 +246,11 @@ def generate_candidates(
         cand = _perturb_from_gt(gt_entity, level_cfg, rng)
         if entities_equal(cand, gt_entity, check_obs=True) or _is_duplicate(cand, candidates):
             continue
+        if enforce_structure_diversity and (
+            entities_equal(cand, gt_entity, check_obs=False)
+            or _is_structure_duplicate(cand, candidates)
+        ):
+            continue
         if check_consistent_with_true_relation(cand, grid_context, true_rule, true_params, k_h, k_v):
             continue
         if _matches_any_alt(cand, grid_context, alt_specs, k_h, k_v):
@@ -255,6 +270,11 @@ def generate_candidates(
         attempts += 1
         cand = _make_irrelevant(grid_context[0][0] or gt_entity, rng)
         if _is_duplicate(cand, candidates) or entities_equal(cand, gt_entity, check_obs=True):
+            continue
+        if enforce_structure_diversity and (
+            entities_equal(cand, gt_entity, check_obs=False)
+            or _is_structure_duplicate(cand, candidates)
+        ):
             continue
         if check_consistent_with_true_relation(cand, grid_context, true_rule, true_params, k_h, k_v):
             continue
@@ -301,6 +321,12 @@ def generate_candidates(
             alt_hit_count += 1
     if alt_hit_count < mix_cfg.min_analogical_wrong_relation:
         raise RuntimeError("Not enough alt-relation-consistent distractors")
+
+    if enforce_structure_diversity:
+        for i in range(len(all_candidates)):
+            for j in range(i + 1, len(all_candidates)):
+                if entities_equal(all_candidates[i], all_candidates[j], check_obs=False):
+                    raise RuntimeError("Permutation candidates have duplicate CSG structures")
 
     return {
         "candidates": all_candidates,
