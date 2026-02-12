@@ -835,6 +835,25 @@ def render_exam() -> None:
         st.error("当前题目没有候选项。")
         return
 
+    merge_toggle_key = f"merge_candidate_in_big_view_{idx}"
+    merge_choice_key = f"merge_candidate_choice_{idx}"
+    if st.session_state.get(merge_choice_key) not in cand_labels:
+        st.session_state[merge_choice_key] = cand_labels[0]
+
+    merge_candidate_in_big_view = st.toggle(
+        "将候选项并入合并大视图",
+        key=merge_toggle_key,
+        help="开启后可将 1 个候选项放到缺失格位置（同一时刻只能选择一个）。",
+    )
+    selected_merge_candidate = None
+    if merge_candidate_in_big_view:
+        selected_merge_candidate = st.radio(
+            "并入大视图的选项（单选）",
+            cand_labels,
+            key=merge_choice_key,
+            horizontal=True,
+        )
+
     # 构建九宫格合并视图：仅展示已知格，缺失格保持空白
     spacing = 2.6
     row_depth = 0.9
@@ -857,6 +876,23 @@ def render_exam() -> None:
                         float((1 - r) * row_depth),
                     ]
                 )
+
+    if selected_merge_candidate is not None:
+        cand_idx = ord(selected_merge_candidate) - ord("A")
+        if 0 <= cand_idx < len(candidate_paths):
+            cand_path = candidate_paths[cand_idx]
+            contents.append(load_ply_text(resolve_ply_path(exam_root, cand_path)))
+            labels.append(f"cand[{selected_merge_candidate}]")
+            offsets.append(
+                [
+                    float((int(target_pos[1]) - 1) * spacing),
+                    float((1 - int(target_pos[0])) * spacing),
+                    float((1 - int(target_pos[0])) * row_depth),
+                ]
+            )
+            st.caption(
+                f"当前合并视图已将选项 {selected_merge_candidate} 放到缺失格位置 {tuple(map(int, target_pos))}。"
+            )
 
     pl_multi_component(
         contents,
