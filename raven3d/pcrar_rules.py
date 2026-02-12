@@ -233,7 +233,13 @@ class CycleRule(PCRARRule):
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
         leaves = entity.get_leaves()
         leaf_count = len(leaves)
-        k = int(rng.integers(1, leaf_count + 1))
+        # 限制参与循环的对象数：不取 1，只在 2/3 中选择（受 leaf_count 上限约束）
+        if leaf_count >= 3:
+            k = int(_choice_from_list(rng, [2, 3]))
+        elif leaf_count == 2:
+            k = 2
+        else:
+            k = 1
         leaf_indices = [int(i) for i in rng.choice(leaf_count, size=k, replace=False)]
         directions = [int(_choice_from_list(rng, [-1, 1])) for _ in range(k)]
         
