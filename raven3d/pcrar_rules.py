@@ -15,7 +15,7 @@ from .csg import (
     CSGNode, Leaf, OpNode, OpType, PrimType, SizeLevel, DeltaLevel,
     PRIM_TYPE_CYCLE, DISCRETE_ANGLES, SIZE_LEVEL_MAP, DELTA_LEVEL_MAP,
     get_all_leaves, get_all_ops, copy_csg, sample_random_csg,
-    enforce_leaf_separation, has_containment_risk,
+    enforce_leaf_separation, has_containment_risk, has_excessive_overlap,
 )
 from .pcrar_entity import (
     PCRAREntity, ObservationConfig, sample_random_entity,
@@ -511,6 +511,9 @@ class ConservationRule(PCRARRule):
         leaves = entity.get_leaves()
         if len(leaves) < 2:
             return False
+        # 过滤已经发生明显遮蔽/包裹的状态，避免题面出现“像只有一个几何体”的情况
+        if has_containment_risk(leaves) or has_excessive_overlap(leaves):
+            return False
         
         idx1 = params.leaf_idx
         idx2 = params.direction  # 复用 direction 存储第二个索引
@@ -526,7 +529,15 @@ class ConservationRule(PCRARRule):
         idx2_size = SIZE_LEVELS.index(leaf2.size_level)
         
         # leaf1 增加需要 idx1_size < max，leaf2 减少需要 idx2_size > 0
-        return idx1_size < len(SIZE_LEVELS) - 1 and idx2_size > 0
+        if not (idx1_size < len(SIZE_LEVELS) - 1 and idx2_size > 0):
+            return False
+
+        # 检查应用一步守恒变换后是否会导致包含/过度重叠
+        candidate = self.apply(entity, params)
+        candidate_leaves = candidate.get_leaves()
+        if has_containment_risk(candidate_leaves) or has_excessive_overlap(candidate_leaves):
+            return False
+        return True
     
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:
         new_entity = entity.copy()
