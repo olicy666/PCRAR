@@ -295,9 +295,12 @@ def _create_matrix_combined_image(
     candidate_images: List[np.ndarray],
     image_size: Tuple[int, int],
 ) -> np.ndarray:
+    from PIL import Image, ImageDraw, ImageFont
+
     tile_w, tile_h = image_size
     pad = 16
     gap = 10
+    cand_label_h = 36
 
     matrix_w = 3 * tile_w + 2 * gap
     matrix_h = 3 * tile_h + 2 * gap
@@ -306,9 +309,10 @@ def _create_matrix_combined_image(
     cand_h = tile_h
 
     canvas_w = max(matrix_w, cand_w) + 2 * pad
-    canvas_h = pad + matrix_h + pad + cand_h + pad
+    canvas_h = pad + matrix_h + pad + cand_h + cand_label_h + pad
 
     canvas = np.full((canvas_h, canvas_w, 3), 255, dtype=np.uint8)
+    missing_boxes: List[Tuple[int, int, int, int]] = []
 
     mx = (canvas_w - matrix_w) // 2
     my = pad
@@ -322,16 +326,47 @@ def _create_matrix_combined_image(
                 blank[::8, :, :] = 220
                 blank[:, ::8, :] = 220
                 canvas[y0 : y0 + tile_h, x0 : x0 + tile_w] = blank
+                missing_boxes.append((x0, y0, tile_w, tile_h))
             else:
                 canvas[y0 : y0 + tile_h, x0 : x0 + tile_w] = img
 
     cy = my + matrix_h + pad
     cx = (canvas_w - cand_w) // 2
+    candidate_boxes: List[Tuple[int, int, int, int, str]] = []
     for i, img in enumerate(candidate_images):
         x0 = cx + i * (tile_w + gap)
         canvas[cy : cy + tile_h, x0 : x0 + tile_w] = img
+        label = chr(ord("A") + i)
+        candidate_boxes.append((x0, cy, tile_w, tile_h, label))
 
-    return canvas
+    pil_img = Image.fromarray(canvas)
+    draw = ImageDraw.Draw(pil_img)
+    try:
+        q_font = ImageFont.truetype("DejaVuSans-Bold.ttf", max(48, int(tile_h * 0.45)))
+    except Exception:
+        q_font = ImageFont.load_default()
+    try:
+        label_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
+    except Exception:
+        label_font = ImageFont.load_default()
+
+    for x0, y0, w, h in missing_boxes:
+        q_text = "?"
+        q_bbox = draw.textbbox((0, 0), q_text, font=q_font)
+        qw = q_bbox[2] - q_bbox[0]
+        qh = q_bbox[3] - q_bbox[1]
+        qx = x0 + (w - qw) // 2
+        qy = y0 + (h - qh) // 2
+        draw.text((qx, qy), q_text, fill=(70, 70, 70), font=q_font)
+
+    for x0, y0, w, h, label in candidate_boxes:
+        b = draw.textbbox((0, 0), label, font=label_font)
+        tw = b[2] - b[0]
+        tx = x0 + (w - tw) // 2
+        ty = y0 + h + 6
+        draw.text((tx, ty), label, fill=(20, 20, 20), font=label_font)
+
+    return np.array(pil_img, dtype=np.uint8)
 
 
 def generate_confusing_view_for_matrix_sample(

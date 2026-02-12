@@ -22,6 +22,7 @@ TOTAL_QUESTIONS = 20
 PLY_HEIGHT = 320
 BIG_PLY_HEIGHT = 560
 POINTS_PER_CLOUD = 8192
+BIG_VIEW_POINT_SIZE_SCALE = 4.5
 
 # 规则名称映射
 RULE_NAMES = {
@@ -297,7 +298,7 @@ def pl_multi_component(
         controls.minDistance = dist * 0.85;
         controls.maxDistance = dist * 1.35;
 
-        const sizeVal = Math.max(radius * 0.002, 0.001) * 3.0;
+        const sizeVal = Math.max(radius * 0.002, 0.001) * {BIG_VIEW_POINT_SIZE_SCALE};
         materials.forEach((material) => {{
           material.size = sizeVal;
         }});
