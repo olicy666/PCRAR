@@ -376,6 +376,139 @@ class PCRARDatasetGenerator:
             },
         }
 
+    @staticmethod
+    def _build_matrix_focus(params: RuleParams, k_h: int, k_v: int) -> str:
+        template = params.template
+        axis = params.axis or "none"
+
+        def _shift_word(step: int) -> str:
+            if step > 0:
+                return f"+{step}"
+            return str(step)
+
+        if template == RuleTemplate.PROGRESSION:
+            if axis == "r":
+                per_t = f"all leaves change size_level by {_shift_word(int(params.direction))} per T"
+                stride = (
+                    f"horizontal net size_level {_shift_word(int(params.direction) * int(k_h))}, "
+                    f"vertical net size_level {_shift_word(int(params.direction) * int(k_v))}"
+                )
+            elif axis == "R":
+                rot_axis = (params.rot_axis or "x").lower()
+                step_deg = int(params.direction) * 60
+                per_t = f"global_pose_deg.{rot_axis} rotates {_shift_word(step_deg)} degrees per T"
+                stride = (
+                    f"horizontal net rotation {_shift_word(step_deg * int(k_h))} degrees on {rot_axis}, "
+                    f"vertical net rotation {_shift_word(step_deg * int(k_v))} degrees on {rot_axis}"
+                )
+            elif axis == "p":
+                per_t = f"all leaves shift slot by {_shift_word(int(params.direction))} per T"
+                stride = (
+                    f"horizontal net slot shift {_shift_word(int(params.direction) * int(k_h))}, "
+                    f"vertical net slot shift {_shift_word(int(params.direction) * int(k_v))}"
+                )
+            elif axis == "d":
+                per_t = f"density_preset_idx changes by {_shift_word(int(params.direction))} per T"
+                stride = (
+                    f"horizontal net density preset shift {_shift_word(int(params.direction) * int(k_h))}, "
+                    f"vertical net density preset shift {_shift_word(int(params.direction) * int(k_v))}"
+                )
+            else:
+                per_t = "one progression attribute changes per T"
+                stride = "horizontal and vertical both apply repeated progression steps"
+        elif template == RuleTemplate.CYCLE:
+            leaf_indices = params.leaf_indices if params.leaf_indices is not None else [params.leaf_idx]
+            leaf_indices = [int(i) for i in leaf_indices if i is not None]
+            directions = params.directions if params.directions is not None else [params.direction] * max(1, len(leaf_indices))
+            leaf_desc = []
+            for idx, leaf_idx in enumerate(leaf_indices):
+                direction = int(directions[idx]) if idx < len(directions) else int(params.direction)
+                leaf_desc.append(f"leaf{leaf_idx}:{_shift_word(direction)}")
+            leaf_part = ", ".join(leaf_desc) if leaf_desc else "selected leaves"
+            per_t = (
+                "primitive_type cycles over Sphere->Box->Cylinder->Cone "
+                f"on {leaf_part}"
+            )
+            stride = (
+                f"horizontal applies T^{int(k_h)} cycle steps; "
+                f"vertical applies T^{int(k_v)} cycle steps"
+            )
+        elif template == RuleTemplate.COPY:
+            direction = int(params.direction)
+            copy_dir = "forward (copy from right neighbor in slot order)" if direction > 0 else "reverse (copy from left neighbor in slot order)"
+            if axis == "copy_size_cycle":
+                per_t = f"size_level is copied cyclically in slot order, {copy_dir}"
+            elif axis == "copy_density_cycle":
+                per_t = f"part_sampling_weights are copied cyclically in slot order, {copy_dir}"
+            elif axis == "copy_shape_cycle":
+                per_t = f"prim_type is copied cyclically in slot order, {copy_dir}"
+            else:
+                per_t = f"copy pattern {axis} is applied in slot order, {copy_dir}"
+            stride = (
+                f"horizontal applies T^{int(k_h)} copy iterations; "
+                f"vertical applies T^{int(k_v)} copy iterations"
+            )
+        elif template == RuleTemplate.COUNT:
+            direction = int(params.direction)
+            cycle_desc = "1->2->3->1" if direction > 0 else "1->3->2->1"
+            per_t = f"leaf_count follows cycle {cycle_desc}"
+            stride = (
+                f"horizontal applies T^{int(k_h)} count transitions; "
+                f"vertical applies T^{int(k_v)} count transitions"
+            )
+        elif template == RuleTemplate.CONSERVATION:
+            plus_leaf = int(params.leaf_idx) if params.leaf_idx is not None else None
+            minus_leaf = int(params.direction) if params.direction is not None else None
+            per_t = f"size conservation pair: leaf{plus_leaf} +1 level, leaf{minus_leaf} -1 level"
+            stride = (
+                f"horizontal applies T^{int(k_h)} conservation transitions; "
+                f"vertical applies T^{int(k_v)} conservation transitions"
+            )
+        elif template == RuleTemplate.PERMUTATION:
+            direction = int(params.direction)
+            perm_dir = "right shift" if direction > 0 else "left shift"
+            per_t = f"slot assignment is permuted by one-step {perm_dir} per T"
+            stride = (
+                f"horizontal applies T^{int(k_h)} permutations; "
+                f"vertical applies T^{int(k_v)} permutations"
+            )
+        elif template == RuleTemplate.SYMMETRY:
+            if axis == "d":
+                direction = int(params.direction)
+                per_t = f"density_preset_idx changes by {_shift_word(direction)} per T"
+                stride = (
+                    f"horizontal net density preset shift {_shift_word(direction * int(k_h))}, "
+                    f"vertical net density preset shift {_shift_word(direction * int(k_v))}"
+                )
+            else:
+                left_idx = int(params.leaf_idx) if params.leaf_idx is not None else None
+                right_idx = int(params.direction) if params.direction is not None else None
+                if axis == "R":
+                    per_t = f"symmetry pair: leaf{left_idx} local_pose_deg.x +90, leaf{right_idx} local_pose_deg.x -90"
+                elif axis == "r":
+                    per_t = f"symmetry pair: leaf{left_idx} size_level +1, leaf{right_idx} size_level -1"
+                elif axis == "p":
+                    per_t = f"symmetry pair: leaf{left_idx} slot +1, leaf{right_idx} slot -1"
+                else:
+                    per_t = f"symmetry transform on axis {axis}"
+                stride = (
+                    f"horizontal applies T^{int(k_h)} symmetry transitions; "
+                    f"vertical applies T^{int(k_v)} symmetry transitions"
+                )
+        else:
+            per_t = f"template {template.value} applies one fixed transform per T"
+            stride = (
+                f"horizontal applies T^{int(k_h)} transitions; "
+                f"vertical applies T^{int(k_v)} transitions"
+            )
+
+        return (
+            f"3x3 matrix completion using one fixed rule instance T (template={template.value}, axis={axis}). "
+            f"Per-T attribute change: {per_t}. "
+            f"Horizontal relation E[r,c+1]=T^{int(k_h)}(E[r,c]); vertical relation E[r+1,c]=T^{int(k_v)}(E[r,c]). "
+            f"Effective stride detail: {stride}."
+        )
+
     def _save_matrix_sample(
         self,
         output_root: Path,
@@ -428,10 +561,11 @@ class PCRARDatasetGenerator:
         for r in range(3):
             for c in range(3):
                 grid_entities[r][c] = grid[r][c].to_dict()
+        matrix_relation = self._build_matrix_relation_spec(params, k_h=k_h, k_v=k_v)
         meta = {
             "id": sample_id,
             "task_type": "matrix_3x3",
-            "focus": "3x3 matrix completion with a fixed rule instance and dual-step strides.",
+            "focus": self._build_matrix_focus(params, k_h=k_h, k_v=k_v),
             "target_position": [2, 2],
             "missing_positions": [[r, c] for r, c in missing_positions_sorted],
             "empty_grid_positions": [[r, c] for r, c in missing_positions_sorted],
@@ -443,7 +577,7 @@ class PCRARDatasetGenerator:
             "distractor_types": distractor_types,
             "rule_template": rule.template.value,
             "rule_params": params.to_dict(),
-            "matrix_relation": self._build_matrix_relation_spec(params, k_h=k_h, k_v=k_v),
+            "matrix_relation": matrix_relation,
             "k_h": int(k_h),
             "k_v": int(k_v),
             "K_max": int(k_max),
