@@ -16,7 +16,7 @@ from .pcrar_entity import PCRAREntity, sample_random_entity, DEFAULT_N_POINTS, e
 from .pcrar_rules import (
     RuleTemplate, RuleParams, PCRARRule,
     sample_applicable_rule, generate_distractor, get_rule,
-    RULE_SOURCE_ALIGN,
+    RULE_SOURCE_ALIGN, SYMMETRY_DENSITY_WEIGHT_STEP,
 )
 
 
@@ -69,12 +69,36 @@ class PCRARDatasetGenerator:
         base_shape = leaves[0].prim_type
         for leaf in leaves[1:]:
             leaf.prim_type = base_shape
+        # 尺寸保持一致（密度题不引入尺寸干扰）
+        base_size = leaves[0].size_level
+        for leaf in leaves[1:]:
+            leaf.size_level = base_size
         # 固定为 8192，总点数不变
         from .pcrar_entity import DEFAULT_N_POINTS
         entity.obs.density_preset_idx = 0
         entity.obs.n_points = DEFAULT_N_POINTS
         # 使用可区分且和为 1 的权重
         weights = np.array([0.5, 0.3125, 0.1875], dtype=float)
+        entity.obs.part_sampling_weights = [float(w) for w in weights]
+
+    def _set_symmetry_density_weights_boundary(self, entity: PCRAREntity, direction: int) -> None:
+        leaves = entity.get_leaves()
+        if len(leaves) != 2:
+            return
+        indexed = list(enumerate(leaves))
+        indexed.sort(key=lambda t: (t[1].slot, t[0]))
+        left_idx = int(indexed[0][0])
+        right_idx = int(indexed[-1][0])
+        step = float(SYMMETRY_DENSITY_WEIGHT_STEP)
+        low = step
+        high = 1.0 - step
+        weights = np.ones(len(leaves), dtype=float) / float(len(leaves))
+        if int(direction) >= 0:
+            weights[left_idx] = low
+            weights[right_idx] = high
+        else:
+            weights[left_idx] = high
+            weights[right_idx] = low
         entity.obs.part_sampling_weights = [float(w) for w in weights]
 
     def _choose_progression_params(
@@ -188,6 +212,8 @@ class PCRARDatasetGenerator:
         for _ in range(max_entity_attempts):
             if self.config.rule_filter == {RuleTemplate.COPY}:
                 leaf_count = 3
+            elif self.config.rule_filter == {RuleTemplate.SYMMETRY}:
+                leaf_count = 2
             else:
                 leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
             entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
@@ -200,10 +226,7 @@ class PCRARDatasetGenerator:
                     # 为 Symmetry 确保可以连续应用两次
                     leaves = entity_a.get_leaves()
                     if params.axis == "d":
-                        from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
-                        max_idx = len(DENSITY_POINT_PRESETS) - 1
-                        entity_a.obs.density_preset_idx = 0 if params.direction >= 0 else max_idx
-                        entity_a.obs.n_points = density_point_count(entity_a.obs.density_preset_idx)
+                        self._set_symmetry_density_weights_boundary(entity_a, params.direction)
                     if len(leaves) >= 2 and params.leaf_idx is not None and params.direction is not None:
                         from .pcrar_rules import SIZE_LEVELS, SLOTS
                         if params.axis == "p":
@@ -295,6 +318,8 @@ class PCRARDatasetGenerator:
         for _ in range(max_entity_attempts):
             if self.config.rule_filter == {RuleTemplate.COPY}:
                 leaf_count = 3
+            elif self.config.rule_filter == {RuleTemplate.SYMMETRY}:
+                leaf_count = 2
             else:
                 leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
             entity_a = sample_random_entity(self.rng, leaf_count=leaf_count, allowed_ops=self.config.allowed_ops)
@@ -327,10 +352,7 @@ class PCRARDatasetGenerator:
             if rule.template == RuleTemplate.SYMMETRY:
                 leaves = entity_c.get_leaves()
                 if params.axis == "d":
-                    from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
-                    max_idx = len(DENSITY_POINT_PRESETS) - 1
-                    entity_c.obs.density_preset_idx = 0 if params.direction >= 0 else max_idx
-                    entity_c.obs.n_points = density_point_count(entity_c.obs.density_preset_idx)
+                    self._set_symmetry_density_weights_boundary(entity_c, params.direction)
                 if len(leaves) >= 2 and params.leaf_idx is not None and params.direction is not None:
                     from .pcrar_rules import SIZE_LEVELS, SLOTS
                     if params.axis == "p":
@@ -356,6 +378,9 @@ class PCRARDatasetGenerator:
                         base_shape = leaves[0].prim_type
                         for leaf in leaves[1:]:
                             leaf.prim_type = base_shape
+                        base_size = leaves[0].size_level
+                        for leaf in leaves[1:]:
+                            leaf.size_level = base_size
                 elif params.axis == "copy_shape_cycle":
                     from .csg import PRIM_TYPE_CYCLE
                     for i, leaf in enumerate(leaves):
@@ -466,10 +491,7 @@ class PCRARDatasetGenerator:
                                     right.prim_type = PrimType.BOX
                         # 预先调整实体，让 Symmetry 的目标轴可应用（避免偏向 R/d）
                         if params.axis == "d":
-                            from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
-                            max_idx = len(DENSITY_POINT_PRESETS) - 1
-                            entity.obs.density_preset_idx = 0 if params.direction >= 0 else max_idx
-                            entity.obs.n_points = density_point_count(entity.obs.density_preset_idx)
+                            self._set_symmetry_density_weights_boundary(entity, params.direction)
                         else:
                             from .pcrar_rules import SIZE_LEVELS, SLOTS
                             leaves = entity.get_leaves()
@@ -702,7 +724,7 @@ class PCRARDatasetGenerator:
             if axis == "copy_size_cycle":
                 core = "拷贝规则：同形状前提下，尺寸按左右顺序循环拷贝（正向/逆向）。"
             elif axis == "copy_density_cycle":
-                core = "拷贝规则：同形状前提下，leaf 点数权重按左右顺序循环拷贝（总点数 8192）。"
+                core = "拷贝规则：同形状且同尺寸前提下，leaf 点数权重按左右顺序循环拷贝（总点数 8192）。"
             elif axis == "copy_shape_cycle":
                 core = "拷贝规则：形状按左右顺序循环拷贝（正向/逆向），三种形状全不同。"
             else:
@@ -724,7 +746,7 @@ class PCRARDatasetGenerator:
             elif axis == "r":
                 core = "对称规则：左右 leaf 尺寸镜像变化（左 +1，右 -1）。"
             elif axis == "d":
-                core = "对称规则：采样点数档位按方向步进1（总点数变化）。"
+                core = "对称规则：仅2个几何体，左右 leaf 的采样权重做对称变化（左 +Δ，右 -Δ）。"
             else:
                 core = "对称规则：左右 leaf 做镜像变换。"
         else:

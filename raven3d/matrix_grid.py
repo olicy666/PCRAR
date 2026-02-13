@@ -8,7 +8,7 @@ import numpy as np
 
 from .csg import DeltaLevel, SizeLevel
 from .pcrar_entity import PCRAREntity, DENSITY_POINT_PRESETS, density_point_count, entities_equal
-from .pcrar_rules import PCRARRule, RuleParams, RuleTemplate
+from .pcrar_rules import PCRARRule, RuleParams, RuleTemplate, SYMMETRY_DENSITY_WEIGHT_STEP
 
 
 Grid3x3 = List[List[PCRAREntity]]
@@ -97,6 +97,27 @@ def _set_density_at_boundary(entity: PCRAREntity, direction: int, level_cfg: Mat
     entity.obs.n_points = density_point_count(int(idx))
 
 
+def _set_symmetry_density_weights_at_boundary(entity: PCRAREntity, direction: int) -> None:
+    leaves = entity.get_leaves()
+    if len(leaves) != 2:
+        return
+    indexed = list(enumerate(leaves))
+    indexed.sort(key=lambda t: (t[1].slot, t[0]))
+    left_idx = int(indexed[0][0])
+    right_idx = int(indexed[-1][0])
+    step = float(SYMMETRY_DENSITY_WEIGHT_STEP)
+    low = step
+    high = 1.0 - step
+    weights = np.ones(len(leaves), dtype=float) / float(len(leaves))
+    if int(direction) >= 0:
+        weights[left_idx] = low
+        weights[right_idx] = high
+    else:
+        weights[left_idx] = high
+        weights[right_idx] = low
+    entity.obs.part_sampling_weights = [float(w) for w in weights]
+
+
 def _set_size_at_boundary(entity: PCRAREntity, direction: int, level_cfg: MatrixLevelConfig) -> None:
     target = level_cfg.size_levels[0] if direction >= 0 else level_cfg.size_levels[-1]
     for leaf in entity.get_leaves():
@@ -131,7 +152,7 @@ def prepare_entity_for_rule_path(
                 leaves[li].size_level = level_cfg.size_levels[0]
                 leaves[ri].size_level = level_cfg.size_levels[-1]
         elif params.axis == "d":
-            _set_density_at_boundary(out, params.direction, level_cfg)
+            _set_symmetry_density_weights_at_boundary(out, params.direction)
     elif params.template == RuleTemplate.CONSERVATION:
         leaves = out.get_leaves()
         li, ri = params.leaf_idx, params.direction

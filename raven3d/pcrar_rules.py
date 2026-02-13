@@ -28,6 +28,8 @@ SIZE_LEVELS = list(SizeLevel)
 DELTA_LEVELS = list(DeltaLevel)
 # 槽位列表
 SLOTS = [-1, 0, 1]
+# 对称规则密度步长（左右采样权重一增一减）
+SYMMETRY_DENSITY_WEIGHT_STEP = 0.1
 
 
 class RuleTemplate(str, Enum):
@@ -292,7 +294,8 @@ class CopyRule(PCRARRule):
     """Rule3 Copy（拷贝）
     
     按左右顺序做循环拷贝（正向/逆向）：
-    - 尺寸+密度拷贝：要求全部形状相同（密度为全局采样点数档位）
+    - 尺寸拷贝：要求全部形状相同、尺寸全不同
+    - 密度拷贝：要求全部形状相同、尺寸全部相同（拷贝 part_sampling_weights）
     - 形状拷贝：允许不同形状
     """
     template = RuleTemplate.COPY
@@ -309,7 +312,7 @@ class CopyRule(PCRARRule):
         candidates = []
         if len(set(prims)) == 1 and len(set(sizes)) == 3:
             candidates.append("copy_size_cycle")
-        if len(set(prims)) == 1:
+        if len(set(prims)) == 1 and len(set(sizes)) == 1:
             candidates.append("copy_density_cycle")
         if len(set(prims)) == 3:
             candidates.append("copy_shape_cycle")
@@ -340,8 +343,8 @@ class CopyRule(PCRARRule):
             # 尺寸拷贝：形状必须相同，尺寸必须全不同
             return len(set(prims)) == 1 and len(set(sizes)) == 3
         if params.axis == "copy_density_cycle":
-            # 密度拷贝：形状必须相同，且三份密度权重可区分
-            if len(set(prims)) != 1:
+            # 密度拷贝：形状必须相同、尺寸必须相同，且三份密度权重可区分
+            if len(set(prims)) != 1 or len(set(sizes)) != 1:
                 return False
             weights = _get_density_weights(entity, len(leaves))
             return len(set(float(w) for w in weights)) == 3
@@ -620,15 +623,14 @@ class PermutationRule(PCRARRule):
 class SymmetryRule(PCRARRule):
     """Rule7 Symmetry（对称）
     
-    选一对 leaf（左/右）作为对称对：
-    - A→B 左做 +Δ，则右做 -Δ（作用于 p/R/r/d 之一）
-    - 第三个 leaf（若存在）作为锚点不动
+    仅在 2 个 leaf 上应用：
+    - A→B 左做 +Δ，则右做 -Δ（作用于 R/r/d）
     """
     template = RuleTemplate.SYMMETRY
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.SYMMETRY]
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
-        axis = _choice_from_list(rng, ["R", "r", "d"])  # 姿态/尺寸/密度（不包含位置）
+        axis = _choice_from_list(rng, ["R", "r", "d"])  # 姿态/尺寸/密度
         if axis == "d":
             direction = int(_choice_from_list(rng, [-1, 1]))
             return RuleParams(
@@ -646,28 +648,29 @@ class SymmetryRule(PCRARRule):
     
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
         leaves = entity.get_leaves()
-        if len(leaves) < 2:
+        # 新约束：Symmetry 仅允许 2 几何体
+        if len(leaves) != 2:
             return False
+
         if params.axis == "d":
-            from .pcrar_entity import DENSITY_POINT_PRESETS
-            new_idx = entity.obs.density_preset_idx + params.direction
-            return 0 <= new_idx < len(DENSITY_POINT_PRESETS)
+            left_idx, right_idx = self._pick_left_right(entity)
+            direction = 1 if int(params.direction) >= 0 else -1
+            weights = _get_density_weights(entity, len(leaves))
+            step = float(SYMMETRY_DENSITY_WEIGHT_STEP)
+            left_new = float(weights[left_idx]) + direction * step
+            right_new = float(weights[right_idx]) - direction * step
+            eps = 1e-9
+            return (-eps <= left_new <= 1.0 + eps) and (-eps <= right_new <= 1.0 + eps)
 
         left_idx, right_idx = params.leaf_idx, params.direction
         if left_idx is None or right_idx is None:
             return False
+        if left_idx == right_idx:
+            return False
         if left_idx >= len(leaves) or right_idx >= len(leaves):
             return False
         
-        if params.axis == "p":
-            # 检查位置是否可以对称变化
-            left = leaves[left_idx]
-            right = leaves[right_idx]
-            left_slot_idx = SLOTS.index(left.slot)
-            right_slot_idx = SLOTS.index(right.slot)
-            # 左侧可以增，右侧可以减（或相反）
-            return (left_slot_idx < len(SLOTS) - 1 and right_slot_idx > 0)
-        elif params.axis == "R":
+        if params.axis == "R":
             # 检查姿态是否可旋转（避免球体）
             left = leaves[left_idx]
             right = leaves[right_idx]
@@ -688,16 +691,28 @@ class SymmetryRule(PCRARRule):
         leaves = new_entity.get_leaves()
         
         if params.axis == "d":
-            from .pcrar_entity import DENSITY_POINT_PRESETS, density_point_count
-            new_idx = max(0, min(len(DENSITY_POINT_PRESETS) - 1, new_entity.obs.density_preset_idx + params.direction))
-            new_entity.obs.density_preset_idx = new_idx
-            new_entity.obs.n_points = density_point_count(new_idx)
+            if len(leaves) != 2:
+                return new_entity
+            left_idx, right_idx = self._pick_left_right(new_entity)
+            direction = 1 if int(params.direction) >= 0 else -1
+            weights = _get_density_weights(new_entity, len(leaves))
+            step = float(SYMMETRY_DENSITY_WEIGHT_STEP)
+            new_weights = weights.copy()
+            new_weights[left_idx] = np.clip(float(new_weights[left_idx]) + direction * step, 0.0, 1.0)
+            new_weights[right_idx] = np.clip(float(new_weights[right_idx]) - direction * step, 0.0, 1.0)
+            if float(new_weights.sum()) <= 0.0:
+                new_weights = np.ones(len(leaves), dtype=float) / float(len(leaves))
+            else:
+                new_weights = new_weights / float(new_weights.sum())
+            new_entity.obs.part_sampling_weights = [float(w) for w in new_weights]
             return new_entity
 
-        if len(leaves) < 2:
+        if len(leaves) != 2:
             return new_entity
         left_idx, right_idx = params.leaf_idx, params.direction
         if left_idx is None or right_idx is None:
+            return new_entity
+        if left_idx == right_idx:
             return new_entity
         if left_idx >= len(leaves) or right_idx >= len(leaves):
             return new_entity
@@ -705,17 +720,7 @@ class SymmetryRule(PCRARRule):
         left = leaves[left_idx]
         right = leaves[right_idx]
         
-        if params.axis == "p":
-            # 位置对称变化
-            left_slot_idx = SLOTS.index(left.slot)
-            right_slot_idx = SLOTS.index(right.slot)
-            
-            new_left_idx = min(len(SLOTS) - 1, left_slot_idx + 1)
-            new_right_idx = max(0, right_slot_idx - 1)
-            
-            left.slot = SLOTS[new_left_idx]
-            right.slot = SLOTS[new_right_idx]
-        elif params.axis == "R":
+        if params.axis == "R":
             # 姿态对称变化
             left_pose = list(left.local_pose_deg)
             right_pose = list(right.local_pose_deg)
@@ -818,8 +823,8 @@ def generate_distractor(
     distractor = entity.copy()
     reason = ""
     
-    # 随机选择干扰方式（Symmetry 的 direction 对应右侧索引，避免无意义翻转）
-    if params.template == RuleTemplate.SYMMETRY and params.axis in ("p", "R", "r"):
+    # 随机选择干扰方式（Symmetry 的 R/r 使用左右索引，不做方向翻转）
+    if params.template == RuleTemplate.SYMMETRY and params.axis in ("R", "r"):
         methods = ["different_axis", "different_leaf", "different_rule"]
     else:
         methods = ["different_axis", "different_direction", "different_leaf", "different_rule"]
@@ -828,6 +833,8 @@ def generate_distractor(
     if method == "different_axis" and params.axis:
         # 使用不同的属性轴
         axes = ["r", "R", "p", "d"]
+        if params.template == RuleTemplate.SYMMETRY:
+            axes = ["R", "r", "d"]
         other_axes = [a for a in axes if a != params.axis]
         if other_axes:
             new_axis = _choice_from_list(rng, other_axes)
@@ -851,7 +858,7 @@ def generate_distractor(
                 return distractor, reason
     
     if method == "different_direction":
-        if params.template == RuleTemplate.SYMMETRY and params.axis in ("p", "R", "r"):
+        if params.template == RuleTemplate.SYMMETRY and params.axis in ("R", "r"):
             # Symmetry 的 direction 是右侧索引，不适合翻转
             pass
         else:

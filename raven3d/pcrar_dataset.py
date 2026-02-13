@@ -24,7 +24,14 @@ from .matrix_grid import (
     prepare_entity_for_rule_path,
 )
 from .pcrar_entity import DEFAULT_N_POINTS, PCRAREntity, sample_random_entity
-from .pcrar_rules import PCRARRule, RuleParams, RuleTemplate, RULE_SOURCE_ALIGN, get_rule
+from .pcrar_rules import (
+    PCRARRule,
+    RuleParams,
+    RuleTemplate,
+    RULE_SOURCE_ALIGN,
+    SYMMETRY_DENSITY_WEIGHT_STEP,
+    get_rule,
+)
 
 
 GRID_COLOR_MAP = {
@@ -146,10 +153,13 @@ class PCRARDatasetGenerator:
                 for i, leaf in enumerate(leaves):
                     leaf.size_level = size_levels[int(round(float(idxs[i])))]
         else:
-            # copy_density_cycle: same shape, distinguishable weights
+            # copy_density_cycle: same shape, same size, distinguishable weights
             base = leaves[0].prim_type
             for leaf in leaves:
                 leaf.prim_type = base
+            base_size = leaves[0].size_level
+            for leaf in leaves:
+                leaf.size_level = base_size
             entity.obs.part_sampling_weights = [0.5, 0.3125, 0.1875]
 
     @staticmethod
@@ -219,6 +229,8 @@ class PCRARDatasetGenerator:
                 leaf_count = 3
             elif self.config.rule_filter == {RuleTemplate.PERMUTATION}:
                 leaf_count = 3
+            elif self.config.rule_filter == {RuleTemplate.SYMMETRY}:
+                leaf_count = 2
             else:
                 leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
             e00 = sample_random_entity(
@@ -318,7 +330,7 @@ class PCRARDatasetGenerator:
             summary["changed_attribute"] = "slot_permutation"
             summary["description"] = f"Permutation over slots with direction={params.direction}"
         elif template == RuleTemplate.SYMMETRY:
-            sym_attr_map = {"p": "slot_position", "R": "local_pose", "r": "size_level", "d": "density_level"}
+            sym_attr_map = {"R": "local_pose", "r": "size_level", "d": "density_weights"}
             summary["changed_attribute"] = sym_attr_map.get(axis, "symmetry_axis")
             summary["description"] = f"Symmetry on {summary['changed_attribute']}"
         return summary
@@ -371,7 +383,14 @@ class PCRARDatasetGenerator:
         elif template == RuleTemplate.PERMUTATION:
             detail["per_T_change"] = {"attribute": "slot_permutation", "direction": int(params.direction)}
         elif template == RuleTemplate.SYMMETRY:
-            detail["per_T_change"] = {"attribute": axis, "direction_or_pair": int(params.direction)}
+            if axis == "d":
+                detail["per_T_change"] = {
+                    "attribute": "part_sampling_weights(left/right)",
+                    "step": float(SYMMETRY_DENSITY_WEIGHT_STEP),
+                    "direction": int(params.direction),
+                }
+            else:
+                detail["per_T_change"] = {"attribute": axis, "direction_or_pair": int(params.direction)}
 
         detail["horizontal_effective_change"] = {"applied_power": int(k_h)}
         detail["vertical_effective_change"] = {"applied_power": int(k_v)}
@@ -461,7 +480,7 @@ class PCRARDatasetGenerator:
             if axis == "copy_size_cycle":
                 per_t = f"size_level is copied cyclically in slot order, {copy_dir}"
             elif axis == "copy_density_cycle":
-                per_t = f"part_sampling_weights are copied cyclically in slot order, {copy_dir}"
+                per_t = f"part_sampling_weights are copied cyclically in slot order with all leaves kept at the same size, {copy_dir}"
             elif axis == "copy_shape_cycle":
                 per_t = f"prim_type is copied cyclically in slot order, {copy_dir}"
             else:
@@ -497,10 +516,14 @@ class PCRARDatasetGenerator:
         elif template == RuleTemplate.SYMMETRY:
             if axis == "d":
                 direction = int(params.direction)
-                per_t = f"density_preset_idx changes by {_shift_word(direction)} per T"
+                density_step = float(SYMMETRY_DENSITY_WEIGHT_STEP)
+                if direction >= 0:
+                    per_t = f"symmetry pair density weights: left +{density_step:.1f}, right -{density_step:.1f} per T"
+                else:
+                    per_t = f"symmetry pair density weights: left -{density_step:.1f}, right +{density_step:.1f} per T"
                 stride = (
-                    f"horizontal net density preset shift {_shift_word(direction * int(k_h))}, "
-                    f"vertical net density preset shift {_shift_word(direction * int(k_v))}"
+                    f"horizontal applies T^{int(k_h)} symmetry transitions; "
+                    f"vertical applies T^{int(k_v)} symmetry transitions"
                 )
             else:
                 left_idx = int(params.leaf_idx) if params.leaf_idx is not None else None
@@ -509,8 +532,6 @@ class PCRARDatasetGenerator:
                     per_t = f"symmetry pair: leaf{left_idx} local_pose_deg.x +90, leaf{right_idx} local_pose_deg.x -90"
                 elif axis == "r":
                     per_t = f"symmetry pair: leaf{left_idx} size_level +1, leaf{right_idx} size_level -1"
-                elif axis == "p":
-                    per_t = f"symmetry pair: leaf{left_idx} slot +1, leaf{right_idx} slot -1"
                 else:
                     per_t = f"symmetry transform on axis {axis}"
                 stride = (
@@ -667,11 +688,15 @@ class PCRARDatasetGenerator:
                 preferred_axis=None,
             )
 
-        k_pairs = [
-            (int(kh), int(kv))
-            for kh in self.config.matrix_k_h_choices
-            for kv in self.config.matrix_k_v_choices
-        ]
+        if self.config.rule_filter == {RuleTemplate.SYMMETRY}:
+            # 对称规则按相邻格一步递推：E[r,c+1] = T(E[r,c]), E[r+1,c] = T(E[r,c])
+            k_pairs = [(1, 1)]
+        else:
+            k_pairs = [
+                (int(kh), int(kv))
+                for kh in self.config.matrix_k_h_choices
+                for kv in self.config.matrix_k_v_choices
+            ]
         self.rng.shuffle(k_pairs)
         last_err: Optional[Exception] = None
         for k_h, k_v in k_pairs:
