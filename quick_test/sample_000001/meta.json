@@ -1,7 +1,7 @@
 {
   "id": "sample_000001",
   "task_type": "matrix_3x3",
-  "focus": "3x3 matrix completion using one fixed rule instance T (template=Copy, axis=copy_size_cycle). Per-T attribute change: size_level is copied cyclically in slot order, forward (copy from right neighbor in slot order). Horizontal relation E[r,c+1]=T^2(E[r,c]); vertical relation E[r+1,c]=T^2(E[r,c]). Effective stride detail: horizontal applies T^2 copy iterations; vertical applies T^2 copy iterations.",
+  "focus": "3x3 matrix completion using one fixed rule instance T (template=Count, axis=count). Per-T attribute change: leaf_count follows cycle 1->3->2->1. Horizontal relation E[r,c+1]=T^2(E[r,c]); vertical relation E[r+1,c]=T^2(E[r,c]). Effective stride detail: horizontal applies T^2 count transitions; vertical applies T^2 count transitions.",
   "target_position": [
     2,
     2
@@ -9,11 +9,11 @@
   "missing_positions": [
     [
       0,
-      1
+      0
     ],
     [
       1,
-      0
+      1
     ],
     [
       2,
@@ -23,11 +23,11 @@
   "empty_grid_positions": [
     [
       0,
-      1
+      0
     ],
     [
       1,
-      0
+      1
     ],
     [
       2,
@@ -36,13 +36,13 @@
   ],
   "grid_observation_mask": [
     [
-      true,
       false,
+      true,
       true
     ],
     [
-      false,
       true,
+      false,
       true
     ],
     [
@@ -53,13 +53,13 @@
   ],
   "grid_paths": [
     [
-      "sample_000001/grid_0_0.ply",
       null,
+      "sample_000001/grid_0_1.ply",
       "sample_000001/grid_0_2.ply"
     ],
     [
+      "sample_000001/grid_1_0.ply",
       null,
-      "sample_000001/grid_1_1.ply",
       "sample_000001/grid_1_2.ply"
     ],
     [
@@ -74,21 +74,21 @@
     "sample_000001/cand_2.ply",
     "sample_000001/cand_3.ply"
   ],
-  "gt_index": 0,
-  "gt_label": "A",
+  "gt_index": 3,
+  "gt_label": "D",
   "distractor_types": [
-    "gt",
     "analogical_wrong_relation",
     "perceptual_plausible",
-    "irrelevant"
+    "irrelevant",
+    "gt"
   ],
-  "rule_template": "Copy",
+  "rule_template": "Count",
   "rule_params": {
-    "template": "Copy",
-    "axis": "copy_size_cycle",
+    "template": "Count",
+    "axis": "count",
     "leaf_idx": null,
     "leaf_indices": null,
-    "direction": 1,
+    "direction": -1,
     "directions": null,
     "rot_axis": null,
     "source_indices": null
@@ -96,18 +96,19 @@
   "matrix_relation": {
     "formula": "E[r,c] = T^(r*k_v + c*k_h)(E[0,0])",
     "rule_instance": {
-      "template": "Copy",
-      "axis": "copy_size_cycle",
-      "changed_attribute": "copy_size_cycle",
-      "description": "Copy pattern (copy_size_cycle) with direction=1",
-      "direction": 1
+      "template": "Count",
+      "axis": "count",
+      "changed_attribute": "leaf_count",
+      "description": "Count transition with direction=-1",
+      "direction": -1
     },
     "attribute_change_detail": {
-      "template": "Copy",
-      "axis": "copy_size_cycle",
+      "template": "Count",
+      "axis": "count",
       "per_T_change": {
-        "attribute": "copy_size_cycle",
-        "direction": 1
+        "attribute": "leaf_count",
+        "direction": -1,
+        "cycle": "1->2->3->1 (direction=+1) or reverse (direction=-1)"
       },
       "horizontal_effective_change": {
         "applied_power": 2
@@ -119,14 +120,14 @@
     "horizontal_relation": {
       "step_power": 2,
       "formula": "E[r,c+1] = T^2(E[r,c])",
-      "changed_attribute": "copy_size_cycle",
-      "description": "Copy pattern (copy_size_cycle) with direction=1"
+      "changed_attribute": "leaf_count",
+      "description": "Count transition with direction=-1"
     },
     "vertical_relation": {
       "step_power": 2,
       "formula": "E[r+1,c] = T^2(E[r,c])",
-      "changed_attribute": "copy_size_cycle",
-      "description": "Copy pattern (copy_size_cycle) with direction=1"
+      "changed_attribute": "leaf_count",
+      "description": "Count transition with direction=-1"
     }
   },
   "k_h": 2,
@@ -171,16 +172,19 @@
   },
   "n_points": 8192,
   "rule": {
-    "template": "Copy",
+    "template": "Count",
     "source_align": [
-      "R3"
+      "R1-11",
+      "R3-4",
+      "R3-5",
+      "R4-3"
     ],
     "params": {
-      "template": "Copy",
-      "axis": "copy_size_cycle",
+      "template": "Count",
+      "axis": "count",
       "leaf_idx": null,
       "leaf_indices": null,
-      "direction": 1,
+      "direction": -1,
       "directions": null,
       "rot_axis": null,
       "source_indices": null
@@ -199,78 +203,12 @@
               "left": {
                 "type": "leaf",
                 "id": 0,
-                "prim": "sphere",
-                "size": "XS",
-                "local_pose_deg": [
-                  120,
-                  180,
-                  240
-                ],
-                "slot": 1,
-                "delta_level": "Far"
-              },
-              "right": {
-                "type": "leaf",
-                "id": 1,
-                "prim": "sphere",
+                "prim": "cone",
                 "size": "M",
                 "local_pose_deg": [
-                  180,
-                  0,
-                  120
-                ],
-                "slot": -1,
-                "delta_level": "VeryFar"
-              }
-            },
-            "right": {
-              "type": "leaf",
-              "id": 2,
-              "prim": "sphere",
-              "size": "XL",
-              "local_pose_deg": [
-                120,
-                0,
-                120
-              ],
-              "slot": 0,
-              "delta_level": "Near"
-            }
-          },
-          "obs": {
-            "global_pose_deg": [
-              300,
-              300,
-              180
-            ],
-            "global_translation": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "sampling_mode": "surface",
-            "n_points": 7168,
-            "part_sampling_weights": null,
-            "density_preset_idx": 3
-          },
-          "expr": "Union(Union(Sphere,Sphere),Sphere)"
-        },
-        {
-          "csg": {
-            "type": "op",
-            "op": "union",
-            "left": {
-              "type": "op",
-              "op": "union",
-              "left": {
-                "type": "leaf",
-                "id": 0,
-                "prim": "sphere",
-                "size": "XL",
-                "local_pose_deg": [
-                  120,
-                  180,
-                  240
+                  60,
+                  300,
+                  0
                 ],
                 "slot": 1,
                 "delta_level": "Far"
@@ -278,101 +216,35 @@
               "right": {
                 "type": "leaf",
                 "id": 1,
-                "prim": "sphere",
-                "size": "XS",
-                "local_pose_deg": [
-                  180,
-                  0,
-                  120
-                ],
-                "slot": -1,
-                "delta_level": "VeryFar"
-              }
-            },
-            "right": {
-              "type": "leaf",
-              "id": 2,
-              "prim": "sphere",
-              "size": "M",
-              "local_pose_deg": [
-                120,
-                0,
-                120
-              ],
-              "slot": 0,
-              "delta_level": "Near"
-            }
-          },
-          "obs": {
-            "global_pose_deg": [
-              300,
-              300,
-              180
-            ],
-            "global_translation": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "sampling_mode": "surface",
-            "n_points": 7168,
-            "part_sampling_weights": null,
-            "density_preset_idx": 3
-          },
-          "expr": "Union(Union(Sphere,Sphere),Sphere)"
-        },
-        {
-          "csg": {
-            "type": "op",
-            "op": "union",
-            "left": {
-              "type": "op",
-              "op": "union",
-              "left": {
-                "type": "leaf",
-                "id": 0,
-                "prim": "sphere",
+                "prim": "cone",
                 "size": "M",
                 "local_pose_deg": [
-                  120,
-                  180,
-                  240
-                ],
-                "slot": 1,
-                "delta_level": "Far"
-              },
-              "right": {
-                "type": "leaf",
-                "id": 1,
-                "prim": "sphere",
-                "size": "XL",
-                "local_pose_deg": [
-                  180,
-                  0,
-                  120
+                  60,
+                  60,
+                  180
                 ],
                 "slot": -1,
-                "delta_level": "VeryFar"
+                "delta_level": "Far"
               }
             },
             "right": {
               "type": "leaf",
               "id": 2,
-              "prim": "sphere",
+              "prim": "cylinder",
               "size": "XS",
               "local_pose_deg": [
-                120,
-                0,
-                120
+                60,
+                300,
+                60
               ],
               "slot": 0,
-              "delta_level": "Near"
+              "delta_level": "Far"
             }
           },
           "obs": {
             "global_pose_deg": [
               300,
-              300,
+              0,
               180
             ],
             "global_translation": [
@@ -381,11 +253,241 @@
               0.0
             ],
             "sampling_mode": "surface",
-            "n_points": 7168,
+            "n_points": 9216,
             "part_sampling_weights": null,
-            "density_preset_idx": 3
+            "density_preset_idx": 1
           },
-          "expr": "Union(Union(Sphere,Sphere),Sphere)"
+          "expr": "Union(Union(Cone,Cone),Cylinder)"
+        },
+        {
+          "csg": {
+            "type": "leaf",
+            "id": 0,
+            "prim": "cone",
+            "size": "M",
+            "local_pose_deg": [
+              60,
+              300,
+              0
+            ],
+            "slot": 1,
+            "delta_level": "Far"
+          },
+          "obs": {
+            "global_pose_deg": [
+              300,
+              0,
+              180
+            ],
+            "global_translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "sampling_mode": "surface",
+            "n_points": 10240,
+            "part_sampling_weights": null,
+            "density_preset_idx": 0
+          },
+          "expr": "Cone"
+        },
+        {
+          "csg": {
+            "type": "op",
+            "op": "union",
+            "left": {
+              "type": "leaf",
+              "id": 0,
+              "prim": "cone",
+              "size": "M",
+              "local_pose_deg": [
+                60,
+                300,
+                0
+              ],
+              "slot": -1,
+              "delta_level": "Far"
+            },
+            "right": {
+              "type": "leaf",
+              "id": 1,
+              "prim": "cone",
+              "size": "M",
+              "local_pose_deg": [
+                0,
+                0,
+                0
+              ],
+              "slot": 1,
+              "delta_level": "Far"
+            }
+          },
+          "obs": {
+            "global_pose_deg": [
+              300,
+              0,
+              180
+            ],
+            "global_translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "sampling_mode": "surface",
+            "n_points": 10240,
+            "part_sampling_weights": null,
+            "density_preset_idx": 0
+          },
+          "expr": "Union(Cone,Cone)"
+        }
+      ],
+      [
+        {
+          "csg": {
+            "type": "leaf",
+            "id": 0,
+            "prim": "cone",
+            "size": "M",
+            "local_pose_deg": [
+              60,
+              300,
+              0
+            ],
+            "slot": 1,
+            "delta_level": "Far"
+          },
+          "obs": {
+            "global_pose_deg": [
+              300,
+              0,
+              180
+            ],
+            "global_translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "sampling_mode": "surface",
+            "n_points": 10240,
+            "part_sampling_weights": null,
+            "density_preset_idx": 0
+          },
+          "expr": "Cone"
+        },
+        {
+          "csg": {
+            "type": "op",
+            "op": "union",
+            "left": {
+              "type": "leaf",
+              "id": 0,
+              "prim": "cone",
+              "size": "M",
+              "local_pose_deg": [
+                60,
+                300,
+                0
+              ],
+              "slot": -1,
+              "delta_level": "Far"
+            },
+            "right": {
+              "type": "leaf",
+              "id": 1,
+              "prim": "cone",
+              "size": "M",
+              "local_pose_deg": [
+                0,
+                0,
+                0
+              ],
+              "slot": 1,
+              "delta_level": "Far"
+            }
+          },
+          "obs": {
+            "global_pose_deg": [
+              300,
+              0,
+              180
+            ],
+            "global_translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "sampling_mode": "surface",
+            "n_points": 10240,
+            "part_sampling_weights": null,
+            "density_preset_idx": 0
+          },
+          "expr": "Union(Cone,Cone)"
+        },
+        {
+          "csg": {
+            "type": "op",
+            "op": "union",
+            "left": {
+              "type": "op",
+              "op": "union",
+              "left": {
+                "type": "leaf",
+                "id": 0,
+                "prim": "cone",
+                "size": "M",
+                "local_pose_deg": [
+                  60,
+                  300,
+                  0
+                ],
+                "slot": -1,
+                "delta_level": "Far"
+              },
+              "right": {
+                "type": "leaf",
+                "id": 1,
+                "prim": "cone",
+                "size": "M",
+                "local_pose_deg": [
+                  0,
+                  0,
+                  0
+                ],
+                "slot": 1,
+                "delta_level": "Far"
+              }
+            },
+            "right": {
+              "type": "leaf",
+              "id": 2,
+              "prim": "cone",
+              "size": "M",
+              "local_pose_deg": [
+                0,
+                0,
+                0
+              ],
+              "slot": 0,
+              "delta_level": "Far"
+            }
+          },
+          "obs": {
+            "global_pose_deg": [
+              300,
+              0,
+              180
+            ],
+            "global_translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "sampling_mode": "surface",
+            "n_points": 10240,
+            "part_sampling_weights": null,
+            "density_preset_idx": 0
+          },
+          "expr": "Union(Union(Cone,Cone),Cone)"
         }
       ],
       [
@@ -394,385 +496,36 @@
             "type": "op",
             "op": "union",
             "left": {
-              "type": "op",
-              "op": "union",
-              "left": {
-                "type": "leaf",
-                "id": 0,
-                "prim": "sphere",
-                "size": "XL",
-                "local_pose_deg": [
-                  120,
-                  180,
-                  240
-                ],
-                "slot": 1,
-                "delta_level": "Far"
-              },
-              "right": {
-                "type": "leaf",
-                "id": 1,
-                "prim": "sphere",
-                "size": "XS",
-                "local_pose_deg": [
-                  180,
-                  0,
-                  120
-                ],
-                "slot": -1,
-                "delta_level": "VeryFar"
-              }
-            },
-            "right": {
               "type": "leaf",
-              "id": 2,
-              "prim": "sphere",
+              "id": 0,
+              "prim": "cone",
               "size": "M",
               "local_pose_deg": [
-                120,
-                0,
-                120
+                60,
+                300,
+                0
               ],
-              "slot": 0,
-              "delta_level": "Near"
-            }
-          },
-          "obs": {
-            "global_pose_deg": [
-              300,
-              300,
-              180
-            ],
-            "global_translation": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "sampling_mode": "surface",
-            "n_points": 7168,
-            "part_sampling_weights": null,
-            "density_preset_idx": 3
-          },
-          "expr": "Union(Union(Sphere,Sphere),Sphere)"
-        },
-        {
-          "csg": {
-            "type": "op",
-            "op": "union",
-            "left": {
-              "type": "op",
-              "op": "union",
-              "left": {
-                "type": "leaf",
-                "id": 0,
-                "prim": "sphere",
-                "size": "M",
-                "local_pose_deg": [
-                  120,
-                  180,
-                  240
-                ],
-                "slot": 1,
-                "delta_level": "Far"
-              },
-              "right": {
-                "type": "leaf",
-                "id": 1,
-                "prim": "sphere",
-                "size": "XL",
-                "local_pose_deg": [
-                  180,
-                  0,
-                  120
-                ],
-                "slot": -1,
-                "delta_level": "VeryFar"
-              }
+              "slot": -1,
+              "delta_level": "Far"
             },
             "right": {
               "type": "leaf",
-              "id": 2,
-              "prim": "sphere",
-              "size": "XS",
-              "local_pose_deg": [
-                120,
-                0,
-                120
-              ],
-              "slot": 0,
-              "delta_level": "Near"
-            }
-          },
-          "obs": {
-            "global_pose_deg": [
-              300,
-              300,
-              180
-            ],
-            "global_translation": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "sampling_mode": "surface",
-            "n_points": 7168,
-            "part_sampling_weights": null,
-            "density_preset_idx": 3
-          },
-          "expr": "Union(Union(Sphere,Sphere),Sphere)"
-        },
-        {
-          "csg": {
-            "type": "op",
-            "op": "union",
-            "left": {
-              "type": "op",
-              "op": "union",
-              "left": {
-                "type": "leaf",
-                "id": 0,
-                "prim": "sphere",
-                "size": "XS",
-                "local_pose_deg": [
-                  120,
-                  180,
-                  240
-                ],
-                "slot": 1,
-                "delta_level": "Far"
-              },
-              "right": {
-                "type": "leaf",
-                "id": 1,
-                "prim": "sphere",
-                "size": "M",
-                "local_pose_deg": [
-                  180,
-                  0,
-                  120
-                ],
-                "slot": -1,
-                "delta_level": "VeryFar"
-              }
-            },
-            "right": {
-              "type": "leaf",
-              "id": 2,
-              "prim": "sphere",
-              "size": "XL",
-              "local_pose_deg": [
-                120,
-                0,
-                120
-              ],
-              "slot": 0,
-              "delta_level": "Near"
-            }
-          },
-          "obs": {
-            "global_pose_deg": [
-              300,
-              300,
-              180
-            ],
-            "global_translation": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "sampling_mode": "surface",
-            "n_points": 7168,
-            "part_sampling_weights": null,
-            "density_preset_idx": 3
-          },
-          "expr": "Union(Union(Sphere,Sphere),Sphere)"
-        }
-      ],
-      [
-        {
-          "csg": {
-            "type": "op",
-            "op": "union",
-            "left": {
-              "type": "op",
-              "op": "union",
-              "left": {
-                "type": "leaf",
-                "id": 0,
-                "prim": "sphere",
-                "size": "M",
-                "local_pose_deg": [
-                  120,
-                  180,
-                  240
-                ],
-                "slot": 1,
-                "delta_level": "Far"
-              },
-              "right": {
-                "type": "leaf",
-                "id": 1,
-                "prim": "sphere",
-                "size": "XL",
-                "local_pose_deg": [
-                  180,
-                  0,
-                  120
-                ],
-                "slot": -1,
-                "delta_level": "VeryFar"
-              }
-            },
-            "right": {
-              "type": "leaf",
-              "id": 2,
-              "prim": "sphere",
-              "size": "XS",
-              "local_pose_deg": [
-                120,
-                0,
-                120
-              ],
-              "slot": 0,
-              "delta_level": "Near"
-            }
-          },
-          "obs": {
-            "global_pose_deg": [
-              300,
-              300,
-              180
-            ],
-            "global_translation": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "sampling_mode": "surface",
-            "n_points": 7168,
-            "part_sampling_weights": null,
-            "density_preset_idx": 3
-          },
-          "expr": "Union(Union(Sphere,Sphere),Sphere)"
-        },
-        {
-          "csg": {
-            "type": "op",
-            "op": "union",
-            "left": {
-              "type": "op",
-              "op": "union",
-              "left": {
-                "type": "leaf",
-                "id": 0,
-                "prim": "sphere",
-                "size": "XS",
-                "local_pose_deg": [
-                  120,
-                  180,
-                  240
-                ],
-                "slot": 1,
-                "delta_level": "Far"
-              },
-              "right": {
-                "type": "leaf",
-                "id": 1,
-                "prim": "sphere",
-                "size": "M",
-                "local_pose_deg": [
-                  180,
-                  0,
-                  120
-                ],
-                "slot": -1,
-                "delta_level": "VeryFar"
-              }
-            },
-            "right": {
-              "type": "leaf",
-              "id": 2,
-              "prim": "sphere",
-              "size": "XL",
-              "local_pose_deg": [
-                120,
-                0,
-                120
-              ],
-              "slot": 0,
-              "delta_level": "Near"
-            }
-          },
-          "obs": {
-            "global_pose_deg": [
-              300,
-              300,
-              180
-            ],
-            "global_translation": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "sampling_mode": "surface",
-            "n_points": 7168,
-            "part_sampling_weights": null,
-            "density_preset_idx": 3
-          },
-          "expr": "Union(Union(Sphere,Sphere),Sphere)"
-        },
-        {
-          "csg": {
-            "type": "op",
-            "op": "union",
-            "left": {
-              "type": "op",
-              "op": "union",
-              "left": {
-                "type": "leaf",
-                "id": 0,
-                "prim": "sphere",
-                "size": "XL",
-                "local_pose_deg": [
-                  120,
-                  180,
-                  240
-                ],
-                "slot": 1,
-                "delta_level": "Far"
-              },
-              "right": {
-                "type": "leaf",
-                "id": 1,
-                "prim": "sphere",
-                "size": "XS",
-                "local_pose_deg": [
-                  180,
-                  0,
-                  120
-                ],
-                "slot": -1,
-                "delta_level": "VeryFar"
-              }
-            },
-            "right": {
-              "type": "leaf",
-              "id": 2,
-              "prim": "sphere",
+              "id": 1,
+              "prim": "cone",
               "size": "M",
               "local_pose_deg": [
-                120,
                 0,
-                120
+                0,
+                0
               ],
-              "slot": 0,
-              "delta_level": "Near"
+              "slot": 1,
+              "delta_level": "Far"
             }
           },
           "obs": {
             "global_pose_deg": [
               300,
-              300,
+              0,
               180
             ],
             "global_translation": [
@@ -781,11 +534,109 @@
               0.0
             ],
             "sampling_mode": "surface",
-            "n_points": 7168,
+            "n_points": 10240,
             "part_sampling_weights": null,
-            "density_preset_idx": 3
+            "density_preset_idx": 0
           },
-          "expr": "Union(Union(Sphere,Sphere),Sphere)"
+          "expr": "Union(Cone,Cone)"
+        },
+        {
+          "csg": {
+            "type": "op",
+            "op": "union",
+            "left": {
+              "type": "op",
+              "op": "union",
+              "left": {
+                "type": "leaf",
+                "id": 0,
+                "prim": "cone",
+                "size": "M",
+                "local_pose_deg": [
+                  60,
+                  300,
+                  0
+                ],
+                "slot": -1,
+                "delta_level": "Far"
+              },
+              "right": {
+                "type": "leaf",
+                "id": 1,
+                "prim": "cone",
+                "size": "M",
+                "local_pose_deg": [
+                  0,
+                  0,
+                  0
+                ],
+                "slot": 1,
+                "delta_level": "Far"
+              }
+            },
+            "right": {
+              "type": "leaf",
+              "id": 2,
+              "prim": "cone",
+              "size": "M",
+              "local_pose_deg": [
+                0,
+                0,
+                0
+              ],
+              "slot": 0,
+              "delta_level": "Far"
+            }
+          },
+          "obs": {
+            "global_pose_deg": [
+              300,
+              0,
+              180
+            ],
+            "global_translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "sampling_mode": "surface",
+            "n_points": 10240,
+            "part_sampling_weights": null,
+            "density_preset_idx": 0
+          },
+          "expr": "Union(Union(Cone,Cone),Cone)"
+        },
+        {
+          "csg": {
+            "type": "leaf",
+            "id": 0,
+            "prim": "cone",
+            "size": "M",
+            "local_pose_deg": [
+              60,
+              300,
+              0
+            ],
+            "slot": -1,
+            "delta_level": "Far"
+          },
+          "obs": {
+            "global_pose_deg": [
+              300,
+              0,
+              180
+            ],
+            "global_translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "sampling_mode": "surface",
+            "n_points": 10240,
+            "part_sampling_weights": null,
+            "density_preset_idx": 0
+          },
+          "expr": "Cone"
         }
       ]
     ],
@@ -795,252 +646,37 @@
           "type": "op",
           "op": "union",
           "left": {
-            "type": "op",
-            "op": "union",
-            "left": {
-              "type": "leaf",
-              "id": 0,
-              "prim": "sphere",
-              "size": "XL",
-              "local_pose_deg": [
-                120,
-                180,
-                240
-              ],
-              "slot": 1,
-              "delta_level": "Far"
-            },
-            "right": {
-              "type": "leaf",
-              "id": 1,
-              "prim": "sphere",
-              "size": "XS",
-              "local_pose_deg": [
-                180,
-                0,
-                120
-              ],
-              "slot": -1,
-              "delta_level": "VeryFar"
-            }
-          },
-          "right": {
             "type": "leaf",
-            "id": 2,
-            "prim": "sphere",
-            "size": "M",
-            "local_pose_deg": [
-              120,
-              0,
-              120
-            ],
-            "slot": 0,
-            "delta_level": "Near"
-          }
-        },
-        "obs": {
-          "global_pose_deg": [
-            300,
-            300,
-            180
-          ],
-          "global_translation": [
-            0.0,
-            0.0,
-            0.0
-          ],
-          "sampling_mode": "surface",
-          "n_points": 7168,
-          "part_sampling_weights": null,
-          "density_preset_idx": 3
-        },
-        "expr": "Union(Union(Sphere,Sphere),Sphere)"
-      },
-      {
-        "csg": {
-          "type": "op",
-          "op": "union",
-          "left": {
-            "type": "op",
-            "op": "union",
-            "left": {
-              "type": "leaf",
-              "id": 0,
-              "prim": "sphere",
-              "size": "M",
-              "local_pose_deg": [
-                120,
-                180,
-                240
-              ],
-              "slot": 1,
-              "delta_level": "Far"
-            },
-            "right": {
-              "type": "leaf",
-              "id": 1,
-              "prim": "sphere",
-              "size": "XL",
-              "local_pose_deg": [
-                180,
-                0,
-                120
-              ],
-              "slot": -1,
-              "delta_level": "VeryFar"
-            }
-          },
-          "right": {
-            "type": "leaf",
-            "id": 2,
-            "prim": "sphere",
-            "size": "XS",
-            "local_pose_deg": [
-              120,
-              0,
-              120
-            ],
-            "slot": 0,
-            "delta_level": "Near"
-          }
-        },
-        "obs": {
-          "global_pose_deg": [
-            300,
-            300,
-            180
-          ],
-          "global_translation": [
-            0.0,
-            0.0,
-            0.0
-          ],
-          "sampling_mode": "surface",
-          "n_points": 7168,
-          "part_sampling_weights": null,
-          "density_preset_idx": 3
-        },
-        "expr": "Union(Union(Sphere,Sphere),Sphere)"
-      },
-      {
-        "csg": {
-          "type": "op",
-          "op": "union",
-          "left": {
-            "type": "op",
-            "op": "union",
-            "left": {
-              "type": "leaf",
-              "id": 0,
-              "prim": "box",
-              "size": "XL",
-              "local_pose_deg": [
-                120,
-                180,
-                240
-              ],
-              "slot": 1,
-              "delta_level": "Far"
-            },
-            "right": {
-              "type": "leaf",
-              "id": 1,
-              "prim": "sphere",
-              "size": "XS",
-              "local_pose_deg": [
-                180,
-                0,
-                120
-              ],
-              "slot": -1,
-              "delta_level": "VeryFar"
-            }
-          },
-          "right": {
-            "type": "leaf",
-            "id": 2,
-            "prim": "sphere",
-            "size": "M",
-            "local_pose_deg": [
-              120,
-              0,
-              120
-            ],
-            "slot": 0,
-            "delta_level": "Near"
-          }
-        },
-        "obs": {
-          "global_pose_deg": [
-            300,
-            300,
-            180
-          ],
-          "global_translation": [
-            0.0,
-            0.0,
-            0.0
-          ],
-          "sampling_mode": "surface",
-          "n_points": 7168,
-          "part_sampling_weights": null,
-          "density_preset_idx": 3
-        },
-        "expr": "Union(Union(Box,Sphere),Sphere)"
-      },
-      {
-        "csg": {
-          "type": "op",
-          "op": "union",
-          "left": {
-            "type": "op",
-            "op": "union",
-            "left": {
-              "type": "leaf",
-              "id": 0,
-              "prim": "sphere",
-              "size": "L",
-              "local_pose_deg": [
-                240,
-                0,
-                240
-              ],
-              "slot": -1,
-              "delta_level": "Far"
-            },
-            "right": {
-              "type": "leaf",
-              "id": 1,
-              "prim": "cone",
-              "size": "L",
-              "local_pose_deg": [
-                60,
-                0,
-                60
-              ],
-              "slot": 1,
-              "delta_level": "Far"
-            }
-          },
-          "right": {
-            "type": "leaf",
-            "id": 2,
+            "id": 0,
             "prim": "cone",
             "size": "M",
             "local_pose_deg": [
-              180,
-              180,
-              60
+              60,
+              300,
+              0
+            ],
+            "slot": -1,
+            "delta_level": "Far"
+          },
+          "right": {
+            "type": "leaf",
+            "id": 1,
+            "prim": "cone",
+            "size": "M",
+            "local_pose_deg": [
+              0,
+              0,
+              0
             ],
             "slot": 0,
-            "delta_level": "Far"
+            "delta_level": "Mid"
           }
         },
         "obs": {
           "global_pose_deg": [
             300,
-            60,
-            240
+            0,
+            180
           ],
           "global_translation": [
             0.0,
@@ -1048,30 +684,126 @@
             0.0
           ],
           "sampling_mode": "surface",
-          "n_points": 8192,
+          "n_points": 10240,
           "part_sampling_weights": null,
-          "density_preset_idx": 2
+          "density_preset_idx": 0
         },
-        "expr": "Union(Union(Sphere,Cone),Cone)"
+        "expr": "Union(Cone,Cone)"
+      },
+      {
+        "csg": {
+          "type": "leaf",
+          "id": 0,
+          "prim": "cone",
+          "size": "M",
+          "local_pose_deg": [
+            60,
+            300,
+            0
+          ],
+          "slot": -1,
+          "delta_level": "Far"
+        },
+        "obs": {
+          "global_pose_deg": [
+            300,
+            0,
+            120
+          ],
+          "global_translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "sampling_mode": "surface",
+          "n_points": 10240,
+          "part_sampling_weights": null,
+          "density_preset_idx": 0
+        },
+        "expr": "Cone"
+      },
+      {
+        "csg": {
+          "type": "leaf",
+          "id": 0,
+          "prim": "sphere",
+          "size": "S",
+          "local_pose_deg": [
+            300,
+            180,
+            0
+          ],
+          "slot": 0,
+          "delta_level": "Far"
+        },
+        "obs": {
+          "global_pose_deg": [
+            60,
+            120,
+            0
+          ],
+          "global_translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "sampling_mode": "surface",
+          "n_points": 6144,
+          "part_sampling_weights": null,
+          "density_preset_idx": 4
+        },
+        "expr": "Sphere"
+      },
+      {
+        "csg": {
+          "type": "leaf",
+          "id": 0,
+          "prim": "cone",
+          "size": "M",
+          "local_pose_deg": [
+            60,
+            300,
+            0
+          ],
+          "slot": -1,
+          "delta_level": "Far"
+        },
+        "obs": {
+          "global_pose_deg": [
+            300,
+            0,
+            180
+          ],
+          "global_translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "sampling_mode": "surface",
+          "n_points": 10240,
+          "part_sampling_weights": null,
+          "density_preset_idx": 0
+        },
+        "expr": "Cone"
       }
     ]
   },
   "notes": {
     "candidate_notes": [
-      "真实关系 T 的唯一正确补全",
       "符合替代关系 T'，但不符合真实关系 T",
       "外观上接近目标格，但不满足真实/替代关系",
-      "与目标域风格或关系明显不一致"
+      "与目标域风格或关系明显不一致",
+      "真实关系 T 的唯一正确补全"
     ],
     "alt_relations": [
       {
-        "rule_template": "Copy",
+        "rule_template": "Count",
         "rule_params": {
-          "template": "Copy",
-          "axis": "copy_size_cycle",
+          "template": "Count",
+          "axis": "count",
           "leaf_idx": null,
           "leaf_indices": null,
-          "direction": -1,
+          "direction": 1,
           "directions": null,
           "rot_axis": null,
           "source_indices": null
@@ -1082,9 +814,9 @@
   "confusing_view": {
     "view_config": {
       "camera_position": [
-        0.0,
-        2.0,
-        7.0
+        0.1,
+        0.5,
+        8.0
       ],
       "camera_target": [
         0.0,
@@ -1096,20 +828,20 @@
         1.0,
         0.0
       ],
-      "fov": 40.0,
-      "confusion_reason": "正面视角，循环拷贝的空间排列模式不明显",
-      "confusion_level": "medium"
+      "fov": 35.0,
+      "confusion_reason": "正面视角使多个部件投影重叠，数量难以准确判断",
+      "confusion_level": "high"
     },
     "layout": "matrix_3x3_plus_candidates",
     "grid_view_paths": [
       [
-        "view_grid_0_0.png",
         null,
+        "view_grid_0_1.png",
         "view_grid_0_2.png"
       ],
       [
+        "view_grid_1_0.png",
         null,
-        "view_grid_1_1.png",
         "view_grid_1_2.png"
       ],
       [
@@ -1125,9 +857,9 @@
       "view_cand_3.png"
     ],
     "rendered_paths": [
-      "view_grid_0_0.png",
+      "view_grid_0_1.png",
       "view_grid_0_2.png",
-      "view_grid_1_1.png",
+      "view_grid_1_0.png",
       "view_grid_1_2.png",
       "view_grid_2_0.png",
       "view_grid_2_1.png",
@@ -1138,7 +870,7 @@
       "view_combined.png"
     ],
     "combined_image": "view_combined.png",
-    "confusion_reason": "正面视角，循环拷贝的空间排列模式不明显",
-    "confusion_level": "medium"
+    "confusion_reason": "正面视角使多个部件投影重叠，数量难以准确判断",
+    "confusion_level": "high"
   }
 }
