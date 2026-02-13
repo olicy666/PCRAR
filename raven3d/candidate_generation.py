@@ -116,6 +116,8 @@ def _sample_alt_rule_candidate(
     k_v: int,
     rng: np.random.Generator,
     template_whitelist: Optional[Sequence[RuleTemplate]] = None,
+    true_rule_v: Optional[PCRARRule] = None,
+    true_params_v: Optional[RuleParams] = None,
 ) -> Optional[Tuple[PCRAREntity, PCRARRule, RuleParams]]:
     anchor = grid_context[2][1]
     if anchor is None:
@@ -147,7 +149,16 @@ def _sample_alt_rule_candidate(
                 continue
             if entities_equal(candidate, gt, check_obs=True):
                 continue
-            if check_consistent_with_true_relation(candidate, grid_context, true_rule, true_params, k_h, k_v):
+            if check_consistent_with_true_relation(
+                candidate,
+                grid_context,
+                true_rule,
+                true_params,
+                k_h,
+                k_v,
+                vertical_rule=true_rule_v,
+                vertical_params=true_params_v,
+            ):
                 continue
             if not check_consistent_with_alt_relation(candidate, grid_context, alt_rule, alt_params, k_h, k_v):
                 continue
@@ -189,6 +200,8 @@ def generate_candidates(
     level_cfg: MatrixLevelConfig,
     rng: np.random.Generator,
     rule_whitelist: Optional[Sequence[RuleTemplate]] = None,
+    true_rule_v: Optional[PCRARRule] = None,
+    true_params_v: Optional[RuleParams] = None,
 ) -> Dict[str, Any]:
     if num_options < 4:
         raise ValueError("num_options must be >= 4 for semantic layering")
@@ -213,6 +226,8 @@ def generate_candidates(
             k_v,
             rng,
             template_whitelist=rule_whitelist,
+            true_rule_v=true_rule_v,
+            true_params_v=true_params_v,
         )
         if sampled is None:
             continue
@@ -251,7 +266,16 @@ def generate_candidates(
             or _is_structure_duplicate(cand, candidates)
         ):
             continue
-        if check_consistent_with_true_relation(cand, grid_context, true_rule, true_params, k_h, k_v):
+        if check_consistent_with_true_relation(
+            cand,
+            grid_context,
+            true_rule,
+            true_params,
+            k_h,
+            k_v,
+            vertical_rule=true_rule_v,
+            vertical_params=true_params_v,
+        ):
             continue
         if _matches_any_alt(cand, grid_context, alt_specs, k_h, k_v):
             continue
@@ -276,7 +300,16 @@ def generate_candidates(
             or _is_structure_duplicate(cand, candidates)
         ):
             continue
-        if check_consistent_with_true_relation(cand, grid_context, true_rule, true_params, k_h, k_v):
+        if check_consistent_with_true_relation(
+            cand,
+            grid_context,
+            true_rule,
+            true_params,
+            k_h,
+            k_v,
+            vertical_rule=true_rule_v,
+            vertical_params=true_params_v,
+        ):
             continue
         if _matches_any_alt(cand, grid_context, alt_specs, k_h, k_v):
             continue
@@ -308,7 +341,16 @@ def generate_candidates(
     true_hits = [
         i
         for i, cand in enumerate(all_candidates)
-        if check_consistent_with_true_relation(cand, grid_context, true_rule, true_params, k_h, k_v)
+        if check_consistent_with_true_relation(
+            cand,
+            grid_context,
+            true_rule,
+            true_params,
+            k_h,
+            k_v,
+            vertical_rule=true_rule_v,
+            vertical_params=true_params_v,
+        )
     ]
     if true_hits != [gt_index]:
         raise RuntimeError(f"Expected exactly one true-relation candidate, got hits={true_hits}")

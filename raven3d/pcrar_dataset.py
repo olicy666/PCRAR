@@ -120,24 +120,35 @@ class PCRARDatasetGenerator:
                 seed=seed,
             )
 
-    def _sample_matrix_rule(self, entity: PCRAREntity) -> Tuple[PCRARRule, RuleParams]:
+    def _sample_matrix_rule(
+        self,
+        entity: PCRAREntity,
+        preferred_axis: Optional[str] = None,
+    ) -> Tuple[PCRARRule, RuleParams]:
         templates = list(self.config.rule_filter) if self.config.rule_filter else list(RuleTemplate)
         self.rng.shuffle(templates)
         for template in templates:
             rule = get_rule(template)
             if template == RuleTemplate.COPY:
-                self._enforce_copy_preconditions(entity)
+                self._enforce_copy_preconditions(entity, preferred_axis=preferred_axis)
             for _ in range(40):
                 params = rule.sample_params(self.rng, entity)
+                if template == RuleTemplate.COPY and preferred_axis and params.axis != preferred_axis:
+                    continue
                 if rule.can_apply(entity, params):
                     return rule, params
         raise RuntimeError("No applicable matrix rule found for current entity")
 
-    def _enforce_copy_preconditions(self, entity: PCRAREntity) -> None:
+    def _enforce_copy_preconditions(self, entity: PCRAREntity, preferred_axis: Optional[str] = None) -> None:
         leaves = entity.get_leaves()
         if len(leaves) != 3:
             return
-        mode = int(self.rng.integers(3))
+        mode_map = {
+            "copy_shape_cycle": 0,
+            "copy_size_cycle": 1,
+            "copy_density_cycle": 2,
+        }
+        mode = mode_map.get(preferred_axis, int(self.rng.integers(3)))
         if mode == 0:
             # copy_shape_cycle: 3 distinct shapes
             for i, leaf in enumerate(leaves):
@@ -149,9 +160,21 @@ class PCRARDatasetGenerator:
                 leaf.prim_type = base
             size_levels = self.level_cfg.size_levels
             if len(size_levels) >= 3:
-                idxs = np.linspace(0, len(size_levels) - 1, 3)
+                # 使用中间三档而非极端档位，降低包含/重叠概率，提升 size 题通过率
+                mid = len(size_levels) // 2
+                lo = max(0, mid - 1)
+                hi = min(len(size_levels) - 1, lo + 2)
+                lo = max(0, hi - 2)
+                chosen = [size_levels[lo], size_levels[lo + 1], size_levels[hi]]
                 for i, leaf in enumerate(leaves):
-                    leaf.size_level = size_levels[int(round(float(idxs[i])))]
+                    leaf.size_level = chosen[i]
+            # 明确左中右槽位并重新分离，避免尺寸差导致遮蔽
+            slots = list(self.level_cfg.slot_levels) if self.level_cfg.slot_levels else [-1, 0, 1]
+            slots = sorted(slots)
+            if len(slots) >= 3:
+                for i, leaf in enumerate(leaves):
+                    leaf.slot = int(slots[i])
+            enforce_leaf_separation(leaves)
         else:
             # copy_density_cycle: same shape, same size, distinguishable weights
             base = leaves[0].prim_type
@@ -215,12 +238,46 @@ class PCRARDatasetGenerator:
     def _build_observation_mask(missing_positions: Set[Tuple[int, int]]) -> List[List[bool]]:
         return [[(r, c) not in missing_positions for c in range(3)] for r in range(3)]
 
+    @staticmethod
+    def _build_symmetry_vertical_params(params_h: RuleParams) -> RuleParams:
+        if params_h.axis == "d":
+            return RuleParams(
+                template=RuleTemplate.SYMMETRY,
+                axis="d",
+                direction=-int(params_h.direction),
+            )
+        return RuleParams(
+            template=RuleTemplate.SYMMETRY,
+            axis=params_h.axis,
+            leaf_idx=int(params_h.direction),
+            direction=int(params_h.leaf_idx) if params_h.leaf_idx is not None else int(params_h.direction),
+        )
+
+    def _prepare_entity_for_symmetry_dual(
+        self,
+        entity: PCRAREntity,
+        params_h: RuleParams,
+    ) -> PCRAREntity:
+        out = entity.copy()
+        leaves = out.get_leaves()
+        if len(leaves) != 2:
+            return out
+        if params_h.axis == "r":
+            mid = len(self.level_cfg.size_levels) // 2
+            center = self.level_cfg.size_levels[mid]
+            for leaf in leaves:
+                leaf.size_level = center
+        elif params_h.axis == "d":
+            out.obs.part_sampling_weights = [0.5, 0.5]
+        return out
+
     def _sample_matrix_problem(
         self,
         k_h: int,
         k_v: int,
+        preferred_axis: Optional[str] = None,
         max_attempts: int = 200,
-    ) -> Tuple[List[List[PCRAREntity]], int, PCRARRule, RuleParams]:
+    ) -> Tuple[List[List[PCRAREntity]], int, PCRARRule, RuleParams, PCRARRule, RuleParams]:
         k_max = 2 * k_h + 2 * k_v
         for _ in range(max_attempts):
             if self.config.rule_filter == {RuleTemplate.COPY}:
@@ -242,18 +299,39 @@ class PCRARDatasetGenerator:
             # 归一化后再次拉开部件，避免出现完全包裹/严重重叠。
             enforce_leaf_separation(e00.get_leaves())
             try:
-                rule, params = self._sample_matrix_rule(e00)
+                rule, params = self._sample_matrix_rule(e00, preferred_axis=preferred_axis)
             except RuntimeError:
                 continue
 
-            e00 = prepare_entity_for_rule_path(e00, rule, params, self.level_cfg)
+            rule_v = rule
+            params_v = params
+            dual_symmetry = rule.template == RuleTemplate.SYMMETRY
+            if dual_symmetry:
+                params_v = self._build_symmetry_vertical_params(params)
+                e00 = self._prepare_entity_for_symmetry_dual(e00, params)
+            else:
+                e00 = prepare_entity_for_rule_path(e00, rule, params, self.level_cfg)
             if not self._entity_visibility_ok(e00):
                 continue
-            if not can_apply_k(e00, rule, params, k_max):
-                continue
+            if dual_symmetry:
+                if not can_apply_k(e00, rule, params, 2 * k_h):
+                    continue
+                if not can_apply_k(e00, rule_v, params_v, 2 * k_v):
+                    continue
+            else:
+                if not can_apply_k(e00, rule, params, k_max):
+                    continue
 
             try:
-                grid, _, _ = generate_grid(e00, rule, params, k_h=k_h, k_v=k_v)
+                grid, _, _ = generate_grid(
+                    e00,
+                    rule,
+                    params,
+                    k_h=k_h,
+                    k_v=k_v,
+                    vertical_rule=rule_v if dual_symmetry else None,
+                    vertical_params=params_v if dual_symmetry else None,
+                )
             except RuntimeError:
                 continue
 
@@ -267,11 +345,13 @@ class PCRARDatasetGenerator:
                 k_h=k_h,
                 k_v=k_v,
                 min_unique=self._min_unique_threshold(rule),
+                vertical_rule=rule_v if dual_symmetry else None,
+                vertical_params=params_v if dual_symmetry else None,
             )
             if not ok:
                 if reason in {"adjacent_cell_collision", "low_global_diversity", "path_consistency_failed"}:
                     continue
-            return grid, k_max, rule, params
+            return grid, k_max, rule, params, rule_v, params_v
 
         raise RuntimeError("Failed to sample a valid 3x3 matrix problem")
 
@@ -397,7 +477,34 @@ class PCRARDatasetGenerator:
         return detail
 
     @classmethod
-    def _build_matrix_relation_spec(cls, params: RuleParams, k_h: int, k_v: int) -> Dict[str, Any]:
+    def _build_matrix_relation_spec(
+        cls,
+        params: RuleParams,
+        k_h: int,
+        k_v: int,
+        params_v: Optional[RuleParams] = None,
+    ) -> Dict[str, Any]:
+        if params_v is not None and params_v.to_dict() != params.to_dict():
+            semantics_h = cls._summarize_rule_semantics(params)
+            semantics_v = cls._summarize_rule_semantics(params_v)
+            return {
+                "formula": "E[r,c] = T_v^(r*k_v)(T_h^(c*k_h)(E[0,0]))",
+                "dual_rule": True,
+                "horizontal_rule_instance": semantics_h,
+                "vertical_rule_instance": semantics_v,
+                "horizontal_relation": {
+                    "step_power": int(k_h),
+                    "formula": f"E[r,c+1] = T_h^{int(k_h)}(E[r,c])",
+                    "changed_attribute": semantics_h["changed_attribute"],
+                    "description": semantics_h["description"],
+                },
+                "vertical_relation": {
+                    "step_power": int(k_v),
+                    "formula": f"E[r+1,c] = T_v^{int(k_v)}(E[r,c])",
+                    "changed_attribute": semantics_v["changed_attribute"],
+                    "description": semantics_v["description"],
+                },
+            }
         semantics = cls._summarize_rule_semantics(params)
         return {
             "formula": "E[r,c] = T^(r*k_v + c*k_h)(E[0,0])",
@@ -418,7 +525,12 @@ class PCRARDatasetGenerator:
         }
 
     @staticmethod
-    def _build_matrix_focus(params: RuleParams, k_h: int, k_v: int) -> str:
+    def _build_matrix_focus(
+        params: RuleParams,
+        k_h: int,
+        k_v: int,
+        params_v: Optional[RuleParams] = None,
+    ) -> str:
         template = params.template
         axis = params.axis or "none"
 
@@ -426,6 +538,15 @@ class PCRARDatasetGenerator:
             if step > 0:
                 return f"+{step}"
             return str(step)
+
+        if params_v is not None and params_v.to_dict() != params.to_dict() and template == RuleTemplate.SYMMETRY:
+            axis_v = params_v.axis or "none"
+            return (
+                "3x3 matrix completion using dual symmetry rules: horizontal uses T_h and vertical uses inverse-like T_v. "
+                f"Horizontal axis={axis}, vertical axis={axis_v}. "
+                f"Horizontal relation E[r,c+1]=T_h^{int(k_h)}(E[r,c]); "
+                f"vertical relation E[r+1,c]=T_v^{int(k_v)}(E[r,c])."
+            )
 
         if template == RuleTemplate.PROGRESSION:
             if axis == "r":
@@ -563,6 +684,8 @@ class PCRARDatasetGenerator:
         k_max: int,
         rule: PCRARRule,
         params: RuleParams,
+        rule_v: Optional[PCRARRule],
+        params_v: Optional[RuleParams],
         candidates: List[PCRAREntity],
         gt_index: int,
         distractor_types: List[str],
@@ -604,11 +727,11 @@ class PCRARDatasetGenerator:
         for r in range(3):
             for c in range(3):
                 grid_entities[r][c] = grid[r][c].to_dict()
-        matrix_relation = self._build_matrix_relation_spec(params, k_h=k_h, k_v=k_v)
+        matrix_relation = self._build_matrix_relation_spec(params, k_h=k_h, k_v=k_v, params_v=params_v)
         meta = {
             "id": sample_id,
             "task_type": "matrix_3x3",
-            "focus": self._build_matrix_focus(params, k_h=k_h, k_v=k_v),
+            "focus": self._build_matrix_focus(params, k_h=k_h, k_v=k_v, params_v=params_v),
             "target_position": [2, 2],
             "missing_positions": [[r, c] for r, c in missing_positions_sorted],
             "empty_grid_positions": [[r, c] for r, c in missing_positions_sorted],
@@ -620,6 +743,7 @@ class PCRARDatasetGenerator:
             "distractor_types": distractor_types,
             "rule_template": rule.template.value,
             "rule_params": params.to_dict(),
+            "rule_params_vertical": params_v.to_dict() if params_v is not None else None,
             "matrix_relation": matrix_relation,
             "k_h": int(k_h),
             "k_v": int(k_v),
@@ -630,6 +754,8 @@ class PCRARDatasetGenerator:
                 "template": rule.template.value,
                 "source_align": RULE_SOURCE_ALIGN.get(rule.template, []),
                 "params": params.to_dict(),
+                "vertical_template": rule_v.template.value if rule_v is not None else None,
+                "vertical_params": params_v.to_dict() if params_v is not None else None,
             },
             "entities": {
                 "grid": grid_entities,
@@ -675,7 +801,7 @@ class PCRARDatasetGenerator:
         correct_idx: Optional[int] = None,
         preferred_axis: Optional[str] = None,
     ) -> Dict[str, Any]:
-        del task_type, preferred_axis
+        del task_type
         output_root = Path(output_root)
         if mode == "legacy":
             if self._legacy_generator is None:
@@ -701,7 +827,11 @@ class PCRARDatasetGenerator:
         last_err: Optional[Exception] = None
         for k_h, k_v in k_pairs:
             try:
-                grid, k_max, rule, params = self._sample_matrix_problem(k_h=k_h, k_v=k_v)
+                grid, k_max, rule, params, rule_v, params_v = self._sample_matrix_problem(
+                    k_h=k_h,
+                    k_v=k_v,
+                    preferred_axis=preferred_axis,
+                )
                 break
             except RuntimeError as exc:
                 last_err = exc
@@ -726,6 +856,8 @@ class PCRARDatasetGenerator:
             level_cfg=self.level_cfg,
             rng=self.rng,
             rule_whitelist=list(self.config.rule_filter) if self.config.rule_filter else None,
+            true_rule_v=rule_v,
+            true_params_v=params_v,
         )
 
         candidates = cand_payload["candidates"]
@@ -758,6 +890,8 @@ class PCRARDatasetGenerator:
             k_max=k_max,
             rule=rule,
             params=params,
+            rule_v=rule_v,
+            params_v=params_v,
             candidates=candidates,
             gt_index=gt_index,
             distractor_types=cand_payload["distractor_types"],
@@ -781,12 +915,38 @@ class PCRARDatasetGenerator:
             return
 
         entries: List[Dict[str, Any]] = []
+        copy_axis_plan: Optional[List[str]] = None
+        if (
+            mode == "matrix"
+            and self.config.rule_filter
+            and len(self.config.rule_filter) == 1
+            and RuleTemplate.COPY in self.config.rule_filter
+        ):
+            axes = ["copy_size_cycle", "copy_density_cycle", "copy_shape_cycle"]
+            base = num_samples // len(axes)
+            remainder = num_samples % len(axes)
+            copy_axis_plan = []
+            for i, axis in enumerate(axes):
+                count = base + (1 if i < remainder else 0)
+                copy_axis_plan.extend([axis] * count)
+            self.rng.shuffle(copy_axis_plan)
+
         max_attempts = 30
         for idx in range(num_samples):
             last_err: Optional[Exception] = None
-            for _ in range(max_attempts):
+            preferred_axis = copy_axis_plan[idx] if copy_axis_plan else None
+            per_sample_attempts = max_attempts
+            if preferred_axis:
+                # 目标轴约束下适当放宽重试次数，保证三类题比例可达
+                per_sample_attempts = 120
+            for _ in range(per_sample_attempts):
                 try:
-                    entry = self.generate_sample(output_root=output_root, sample_index=idx, mode="matrix")
+                    entry = self.generate_sample(
+                        output_root=output_root,
+                        sample_index=idx,
+                        mode="matrix",
+                        preferred_axis=preferred_axis,
+                    )
                     entries.append(entry)
                     break
                 except RuntimeError as exc:
@@ -794,7 +954,7 @@ class PCRARDatasetGenerator:
                     continue
             else:
                 raise RuntimeError(
-                    f"Failed to generate matrix sample {idx} after {max_attempts} attempts: {last_err}"
+                    f"Failed to generate matrix sample {idx} after {per_sample_attempts} attempts: {last_err}"
                 )
 
         write_meta(output_root / "meta.json", entries)

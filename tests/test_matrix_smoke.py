@@ -10,6 +10,7 @@ from raven3d.matrix_grid import (
     check_consistent_with_alt_relation,
     check_consistent_with_true_relation,
     check_path_consistency,
+    generate_grid,
     grid_quality_checks,
 )
 from raven3d.pcrar_entity import PCRAREntity, entities_equal
@@ -68,6 +69,10 @@ def _build_context(
 def validate_entry(entry: Dict[str, Any]) -> None:
     rule = get_rule(RuleTemplate(entry["rule_template"]))
     params = _to_rule_params(entry["rule_params"])
+    params_v_raw = entry.get("rule_params_vertical")
+    params_v = _to_rule_params(params_v_raw) if params_v_raw else params
+    rule_v = get_rule(RuleTemplate(entry["rule_template"])) if params_v_raw else rule
+    dual_rule = bool(params_v_raw) and params_v.to_dict() != params.to_dict()
     k_h = int(entry["k_h"])
     k_v = int(entry["k_v"])
 
@@ -76,21 +81,53 @@ def validate_entry(entry: Dict[str, Any]) -> None:
     gt_index = int(entry["gt_index"])
     distractor_types = entry.get("distractor_types", [])
 
-    # 1) Exponent formula
+    # 1) Relation formula
     e00 = grid[0][0]
-    for r in range(3):
-        for c in range(3):
-            expected = apply_k(e00, rule, params, r * k_v + c * k_h)
-            if not entities_equal(expected, grid[r][c], check_obs=True):
-                raise AssertionError(f"Exponent formula failed at ({r},{c})")
+    if not dual_rule:
+        for r in range(3):
+            for c in range(3):
+                expected = apply_k(e00, rule, params, r * k_v + c * k_h)
+                if not entities_equal(expected, grid[r][c], check_obs=True):
+                    raise AssertionError(f"Exponent formula failed at ({r},{c})")
+    else:
+        expected_grid, _, _ = generate_grid(
+            e00,
+            rule,
+            params,
+            k_h=k_h,
+            k_v=k_v,
+            vertical_rule=rule_v,
+            vertical_params=params_v,
+        )
+        for r in range(3):
+            for c in range(3):
+                if not entities_equal(expected_grid[r][c], grid[r][c], check_obs=True):
+                    raise AssertionError(f"Dual-rule formula failed at ({r},{c})")
 
     # 2) Path consistency
-    if not check_path_consistency(grid, rule, params, k_h, k_v):
+    if not check_path_consistency(
+        grid,
+        rule,
+        params,
+        k_h,
+        k_v,
+        vertical_rule=rule_v if dual_rule else None,
+        vertical_params=params_v if dual_rule else None,
+    ):
         raise AssertionError("Path consistency failed")
 
     # 3) Adjacent differences and global diversity
     min_unique = 3 if rule.template in {RuleTemplate.CYCLE, RuleTemplate.COPY} else 5
-    ok, reason = grid_quality_checks(grid, rule, params, k_h, k_v, min_unique=min_unique)
+    ok, reason = grid_quality_checks(
+        grid,
+        rule,
+        params,
+        k_h,
+        k_v,
+        min_unique=min_unique,
+        vertical_rule=rule_v if dual_rule else None,
+        vertical_params=params_v if dual_rule else None,
+    )
     if not ok:
         raise AssertionError(f"Grid quality check failed: {reason}")
 
@@ -100,7 +137,16 @@ def validate_entry(entry: Dict[str, Any]) -> None:
     true_hits = [
         i
         for i, cand in enumerate(candidates)
-        if check_consistent_with_true_relation(cand, grid_context, rule, params, k_h, k_v)
+        if check_consistent_with_true_relation(
+            cand,
+            grid_context,
+            rule,
+            params,
+            k_h,
+            k_v,
+            vertical_rule=rule_v if dual_rule else None,
+            vertical_params=params_v if dual_rule else None,
+        )
     ]
     if true_hits != [gt_index]:
         raise AssertionError(f"Expected unique true candidate at {gt_index}, got {true_hits}")

@@ -198,9 +198,28 @@ def generate_grid(
     params: RuleParams,
     k_h: int,
     k_v: int,
+    vertical_rule: Optional[PCRARRule] = None,
+    vertical_params: Optional[RuleParams] = None,
 ) -> Tuple[Grid3x3, int, List[PCRAREntity]]:
     if k_h <= 0 or k_v <= 0:
         raise ValueError("k_h and k_v must be positive integers")
+
+    if vertical_rule is not None and vertical_params is not None:
+        # Dual-rule grid: horizontal uses (rule, params), vertical uses (vertical_rule, vertical_params).
+        grid: Grid3x3 = [[e00.copy() for _ in range(3)] for _ in range(3)]
+        for c in range(1, 3):
+            grid[0][c] = apply_k(grid[0][c - 1], rule, params, k_h)
+        for r in range(1, 3):
+            grid[r][0] = apply_k(grid[r - 1][0], vertical_rule, vertical_params, k_v)
+        for r in range(1, 3):
+            for c in range(1, 3):
+                from_left = apply_k(grid[r][c - 1], rule, params, k_h)
+                from_up = apply_k(grid[r - 1][c], vertical_rule, vertical_params, k_v)
+                if not entities_equal(from_left, from_up, check_obs=True):
+                    raise RuntimeError("dual_rule_path_inconsistent")
+                grid[r][c] = from_left
+        k_max = 2 * k_h + 2 * k_v
+        return grid, k_max, []
 
     k_max = 2 * k_h + 2 * k_v
     states: List[PCRAREntity] = [e00.copy()]
@@ -224,12 +243,16 @@ def check_path_consistency(
     params: RuleParams,
     k_h: int,
     k_v: int,
+    vertical_rule: Optional[PCRARRule] = None,
+    vertical_params: Optional[RuleParams] = None,
 ) -> bool:
+    v_rule = vertical_rule or rule
+    v_params = vertical_params or params
     e10 = grid[1][0]
     e01 = grid[0][1]
     e11 = grid[1][1]
     from_right = apply_k(e10, rule, params, k_h)
-    from_down = apply_k(e01, rule, params, k_v)
+    from_down = apply_k(e01, v_rule, v_params, k_v)
     return entities_equal(from_right, e11, check_obs=True) and entities_equal(from_down, e11, check_obs=True)
 
 
@@ -240,8 +263,18 @@ def grid_quality_checks(
     k_h: int,
     k_v: int,
     min_unique: int = 5,
+    vertical_rule: Optional[PCRARRule] = None,
+    vertical_params: Optional[RuleParams] = None,
 ) -> Tuple[bool, str]:
-    if not check_path_consistency(grid, rule, params, k_h, k_v):
+    if not check_path_consistency(
+        grid,
+        rule,
+        params,
+        k_h,
+        k_v,
+        vertical_rule=vertical_rule,
+        vertical_params=vertical_params,
+    ):
         return False, "path_consistency_failed"
 
     pairs: List[Tuple[PCRAREntity, PCRAREntity]] = []
@@ -275,14 +308,18 @@ def check_consistent_with_true_relation(
     params: RuleParams,
     k_h: int,
     k_v: int,
+    vertical_rule: Optional[PCRARRule] = None,
+    vertical_params: Optional[RuleParams] = None,
 ) -> bool:
+    v_rule = vertical_rule or rule
+    v_params = vertical_params or params
     left = grid_context[2][1]
     up = grid_context[1][2]
     if left is None or up is None:
         return False
     try:
         from_left = apply_k(left, rule, params, k_h)
-        from_up = apply_k(up, rule, params, k_v)
+        from_up = apply_k(up, v_rule, v_params, k_v)
     except RuntimeError:
         return False
 
