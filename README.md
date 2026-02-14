@@ -1,125 +1,165 @@
-# PCRAR
+# PCRAR 点云矩阵题作答指南
 
-**Point Cloud Matrix Reasoning**
+本指南面向**做题用户**，目标是让你看到题目文件后，知道这道题该怎么读、怎么推、怎么选。
 
-本项目默认生成 **3x3 九宫格矩阵推理题（RAVEN-like）**。旧的 relational/analogical 题型保留为 `legacy` 可选路径，不参与默认生成。
+## 1. 这类题长什么样
 
-## 快速开始
+每道题本质是一个三乘三矩阵补全题：
 
-环境：Python 3.10+，依赖仅 `numpy`。
+1. 前面大部分格子是已知点云。
+2. 右下角目标格是空的，需要你推理补全。
+3. 系统给出多个候选点云，你要选唯一正确答案。
+
+你可以把它理解成“Raven 九宫格”的点云版本。
+
+## 2. 一道题里有哪些文件
+
+通常每个样本目录会有三类内容：
+
+1. 已知格子的点云文件（矩阵上下文）。
+2. 候选答案点云文件（多选一）。
+3. 元信息文件（记录题目信息、正确项索引等，评测时用）。
+
+如果目录里有合成预览图（例如上下文+候选拼图），可以先看图快速理解布局，再回到点云细看细节。
+
+## 3. 正确解题思路（推荐按这个流程）
+
+### 第一步：先找“变化的主属性”
+
+先判断矩阵里主要在变什么，不要一开始就盯单个细节。常见主属性包括：
+
+1. 形状在变（例如球/盒/柱等轮换）。
+2. 尺寸在变（逐步变大或变小）。
+3. 位置在变（左右位置或槽位轮换）。
+4. 数量在变（对象个数按周期变化）。
+5. 密度在变（点分布权重变化，观感会更“偏向某个局部”）。
+6. 左右对称关系在变（一边加、一边减）。
+
+### 第二步：看“行方向”和“列方向”是否一致
+
+这类题的关键是：
+
+1. 同一题只用一套核心规律。
+2. 行方向和列方向都遵守这套规律。
+3. 行与列可能“变化速度不同”，但不是两套互相冲突的规则。
+
+所以你要分别看：
+
+1. 从左到右是否按固定方式推进。
+2. 从上到下是否按同类方式推进。
+
+### 第三步：用两个锚点推目标格
+
+推右下角时，优先使用两个邻近锚点：
+
+1. 右下角左边那个格子。
+2. 右下角上边那个格子。
+
+正确答案必须同时和这两个方向都对得上；只对上一个方向通常不够。
+
+### 第四步：先排除，再确认
+
+候选项里常见三种“像对但不对”的情况：
+
+1. 外观很像，但关系不成立。
+2. 局部成立，但整体方向不一致。
+3. 能解释成另一套规律，但不是本题真实规律。
+
+实战中先把这三类排掉，再在剩余项里找同时满足行列关系的那一个。
+
+## 4. 七类常见规律怎么识别
+
+### 1) 递进
+
+特征：同一属性按固定方向一步步变化。
+
+判断方法：
+
+1. 看三连格是否呈单调推进。
+2. 看列方向是否延续同样趋势。
+
+### 2) 循环
+
+特征：属性按固定顺序轮转，走一圈会回到起点。
+
+判断方法：
+
+1. 看是否出现“轮换而非单调”。
+2. 看不同位置是否遵守同一个轮换顺序。
+
+### 3) 拷贝
+
+特征：某个属性按位置顺序“传递”到相邻对象。
+
+判断方法：
+
+1. 先确定对象顺序（通常按左右位置）。
+2. 看属性是不是在做循环传递，而不是随机变化。
+
+### 4) 增减
+
+特征：对象数量按固定周期变化。
+
+判断方法：
+
+1. 先只数个数，不看细节。
+2. 看周期是否稳定重复。
+
+### 5) 守恒
+
+特征：一边增一边减，总体保持平衡关系。
+
+判断方法：
+
+1. 找成对对象。
+2. 看是否长期保持“此消彼长”的对应关系。
+
+### 6) 置换
+
+特征：对象位置轮换，属性本身可能不变。
+
+判断方法：
+
+1. 追踪“是谁换了位置”，而不是只看位置上是什么。
+2. 看轮换方向是否固定。
+
+### 7) 对称
+
+特征：左右两侧做镜像式相反变化。
+
+判断方法：
+
+1. 先确定左右配对关系。
+2. 看是否稳定满足“一边增加、另一边减少”。
+
+## 5. 做题时最容易犯的错
+
+1. 只看外观像不像，不看关系是否一致。
+2. 只验证行方向，不验证列方向。
+3. 把“变化速度不同”误判成“规则不同”。
+4. 过度关注一个局部细节，忽略全局模式。
+
+## 6. 一份可直接照着走的答题检查清单
+
+做每题前后都可以按下面检查：
+
+1. 我是否已经确认主要变化属性？
+2. 我是否分别验证了行方向和列方向？
+3. 我是否用目标格左侧和上侧都做了推理校验？
+4. 我是否排除了“外观像但关系不成立”的候选？
+5. 最终答案是否是唯一同时满足两方向关系的选项？
+
+如果以上 5 条都满足，通常就是高质量作答。
+
+## 7. 快速上手（生成与自测）
 
 ```bash
 pip install -r requirements.txt
 
-# 默认：PCRAR matrix 题型
+# 生成矩阵题
 python main.py --mode pcrar --output output_matrix --num-samples 10 --seed 0
 
-# 可选：PCRAR legacy（旧路径）
-python main.py --mode pcrar-legacy --output output_legacy --num-samples 10 --seed 0
+# 烟雾测试
+python -m tests.test_matrix_smoke --dataset output_matrix
 ```
 
-## Matrix 题型定义（默认）
-
-- 单题固定一个规则实例 `T = (RuleTemplate + RuleParams)`。
-- 3x3 按指数公式生成：
-  - `E[r,c] = T^(r*k_v + c*k_h)(E[0,0])`
-- 目标格固定挖空 `(2,2)`；默认每行再采样一个缺失位（总计 3 个缺失格）。
-- 候选为多选一（默认 4 选 1，可配）。
-
-默认步长：
-- `k_h` 从 `{1,2}` 采样
-- `k_v` 从 `{1,2}` 采样
-- `K_max = 2*k_h + 2*k_v`
-
-默认离散档位：
-- `matrix_size_levels=7`
-- `matrix_density_levels=5`
-- `matrix_delta_levels=5`
-- `matrix_slot_levels=[-1,0,1]`
-
-## 命令行参数（PCRAR matrix）
-
-```bash
-python main.py --mode pcrar \
-  --output output_matrix \
-  --num-samples 100 \
-  --num-options 4 \
-  --k-h-choices 1,2 \
-  --k-v-choices 1,2 \
-  --matrix-size-levels 7 \
-  --matrix-density-levels 5 \
-  --matrix-delta-levels 5 \
-  --matrix-slot-levels -1,0,1 \
-  --matrix-missing-one-per-row \
-  --pcrar-rules Progression,Cycle,Copy \
-  --seed 0
-```
-
-默认会同时生成规则感知的 2D 渲染：
-- `view_grid_r_c.png`
-- `view_cand_i.png`
-- `view_combined.png`（九宫格上下文 + 候选合成图）
-
-可关闭：
-
-```bash
-python main.py --mode pcrar --no-generate-confusing-view --output output_matrix --num-samples 10
-
-# 若要回退到仅挖空目标格 (2,2)
-python main.py --mode pcrar --no-matrix-missing-one-per-row --output output_matrix --num-samples 10
-```
-
-## 输出格式（新标准）
-
-```
-output_matrix/
-├── sample_000000/
-│   ├── grid_0_0.ply
-│   ├── grid_0_1.ply
-│   ├── ...
-│   ├── grid_2_1.ply
-│   ├── cand_0.ply
-│   ├── cand_1.ply
-│   ├── cand_2.ply
-│   ├── cand_3.ply
-│   └── meta.json
-└── meta.json
-```
-
-`meta.json`（每题）关键字段：
-
-```json
-{
-  "task_type": "matrix_3x3",
-  "grid_paths": [["...", null, "..."], [null, "...", "..."], ["...", "...", null]],
-  "target_position": [2, 2],
-  "missing_positions": [[0, 1], [1, 0], [2, 2]],
-  "grid_observation_mask": [[true, false, true], [false, true, true], [true, true, false]],
-  "rule_template": "Progression",
-  "rule_params": {"template": "Progression", "axis": "r", "direction": 1},
-  "k_h": 2,
-  "k_v": 1,
-  "K_max": 6,
-  "matrix_level_config": {
-    "size_levels": ["XS", "S", "SM", "M", "ML", "L", "XL"],
-    "delta_levels": ["VeryNear", "Near", "Mid", "Far", "VeryFar"],
-    "density_levels": [10240, 9216, 8192, 7168, 6144],
-    "slot_levels": [-1, 0, 1]
-  },
-  "candidate_paths": ["...", "...", "...", "..."],
-  "gt_index": 1,
-  "distractor_types": ["irrelevant", "gt", "analogical_wrong_relation", "perceptual_plausible"]
-}
-```
-
-## Legacy 路径
-
-- `--mode pcrar-legacy`：启用旧 PCRAR relational/analogical 逻辑。
-- 旧主项目模式（`main`, `r1-only` 等）仍可通过 `--mode` 使用。
-
-## 自测
-
-```bash
-python main.py --mode pcrar --output quick_test --num-samples 10 --seed 0
-python -m tests.test_matrix_smoke --dataset quick_test
-```
