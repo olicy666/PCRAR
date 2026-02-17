@@ -133,7 +133,41 @@
 2. 看是否稳定满足“一边增加、另一边减少”。
 
 
-## 5. 快速上手（生成与自测）
+## 5. 行级点云扰动（出题端）
+
+为提升题目鲁棒性，当前矩阵题在导出 `grid_*.ply` 时按行注入扰动：
+
+1. 第 1 行（index=0）：不扰动。
+2. 第 2 行（index=1）：轻扰动。
+3. 第 3 行（index=2）：同类型扰动，但强度大于第 2 行。
+
+每道题只使用一种扰动类型，且类型在下列 4 类中随机选择（均匀采样）：
+
+1. 密度降采样（`density`）。
+2. 坐标抖动（`jitter`）。
+3. 坐标量化（`quantize`）。
+4. 少量离群点替换（`outlier`）。
+
+同一题内，第 2 行和第 3 行使用同一种类型，第 3 行强度更高。所选类型会写入 `meta.json` 的 `point_cloud_row_perturbation.selected_type`。
+
+默认强度参数（见 `raven3d/pcrar_dataset.py`）：
+
+1. 第 2 行：`keep=0.75, jitter=0.003, quant=0.005, outlier=0.01`
+2. 第 3 行：`keep=0.50, jitter=0.009, quant=0.015, outlier=0.04`
+
+密度基础档位（见 `raven3d/pcrar_entity.py`）已上调为：
+
+`[11264, 9728, 8192, 6656, 5120]`
+
+因此在常见中档 `8192` 下，默认三行可见点数约为：
+
+1. 第 1 行：`8192`
+2. 第 2 行：`6144`（`8192 * 0.75`）
+3. 第 3 行：`4096`（`8192 * 0.50`）
+
+说明：默认 `apply_density_perturb_on_density_rules=True`，即 4 类干扰都参与随机抽样（真正 4 选 1）。如需避开密度规则冲突，可手动设为 `False`。
+
+## 6. 快速上手（生成与自测）
 
 ```bash
 pip install -r requirements.txt
@@ -144,4 +178,3 @@ python main.py --mode pcrar --output output_matrix --num-samples 10 --seed 0
 # 烟雾测试
 python -m tests.test_matrix_smoke --dataset output_matrix
 ```
-

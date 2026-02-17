@@ -54,6 +54,8 @@ CAND_COLOR_MAP = {
     5: (255, 152, 150),
 }
 
+ROW_PERTURB_TYPES = ("density", "jitter", "quantize", "outlier")
+
 
 @dataclass
 class PCRARConfig:
@@ -76,7 +78,7 @@ class PCRARConfig:
     view_image_size: Tuple[int, int] = (512, 512)
     rule_filter: Optional[Set[RuleTemplate]] = None
     enable_row_perturbation: bool = True
-    apply_density_perturb_on_density_rules: bool = False
+    apply_density_perturb_on_density_rules: bool = True
     row2_density_keep_ratio: float = 0.75
     row3_density_keep_ratio: float = 0.5
     row2_jitter_std_ratio: float = 0.003
@@ -271,12 +273,25 @@ class PCRARDatasetGenerator:
             return True
         return not (self._rule_uses_density(params_h) or self._rule_uses_density(params_v))
 
+    def _sample_single_perturbation_type(
+        self,
+        params_h: RuleParams,
+        params_v: Optional[RuleParams],
+    ) -> str:
+        choices = list(ROW_PERTURB_TYPES)
+        if not self._allow_density_perturbation(params_h, params_v):
+            choices = [x for x in choices if x != "density"]
+        if not choices:
+            return "jitter"
+        return str(self.rng.choice(choices))
+
     def _apply_point_cloud_perturbation(
         self,
         points: np.ndarray,
         row_idx: int,
         params_h: RuleParams,
         params_v: Optional[RuleParams],
+        perturbation_type: str,
     ) -> np.ndarray:
         if not self.config.enable_row_perturbation:
             return points
@@ -304,30 +319,31 @@ class PCRARDatasetGenerator:
         span = bbox_max - bbox_min
         diag = self._safe_bbox_diag(out)
 
-        keep_ratio = float(np.clip(keep_ratio, 0.05, 1.0))
-        if keep_ratio < 0.999 and self._allow_density_perturbation(params_h, params_v):
-            keep_n = max(32, int(round(len(out) * keep_ratio)))
-            if keep_n < len(out):
-                keep_idx = self.rng.choice(len(out), size=keep_n, replace=False)
-                out = out[keep_idx]
-
-        jitter_std = max(0.0, jitter_ratio) * diag
-        if jitter_std > 0.0:
-            out = out + self.rng.normal(loc=0.0, scale=jitter_std, size=out.shape)
-
-        quant_step = max(0.0, quantize_ratio) * diag
-        if quant_step > 0.0:
-            out = np.round(out / quant_step) * quant_step
-
-        outlier_ratio = float(np.clip(outlier_ratio, 0.0, 0.9))
-        outlier_n = min(len(out), int(round(len(out) * outlier_ratio)))
-        if outlier_n > 0:
-            outlier_idx = self.rng.choice(len(out), size=outlier_n, replace=False)
-            expand = 0.15 * span + 0.05 * diag
-            low = bbox_min - expand
-            high = bbox_max + expand
-            high = np.maximum(high, low + 1e-6)
-            out[outlier_idx] = self.rng.uniform(low=low, high=high, size=(outlier_n, 3))
+        if perturbation_type == "density":
+            keep_ratio = float(np.clip(keep_ratio, 0.05, 1.0))
+            if keep_ratio < 0.999 and self._allow_density_perturbation(params_h, params_v):
+                keep_n = max(32, int(round(len(out) * keep_ratio)))
+                if keep_n < len(out):
+                    keep_idx = self.rng.choice(len(out), size=keep_n, replace=False)
+                    out = out[keep_idx]
+        elif perturbation_type == "jitter":
+            jitter_std = max(0.0, jitter_ratio) * diag
+            if jitter_std > 0.0:
+                out = out + self.rng.normal(loc=0.0, scale=jitter_std, size=out.shape)
+        elif perturbation_type == "quantize":
+            quant_step = max(0.0, quantize_ratio) * diag
+            if quant_step > 0.0:
+                out = np.round(out / quant_step) * quant_step
+        elif perturbation_type == "outlier":
+            outlier_ratio = float(np.clip(outlier_ratio, 0.0, 0.9))
+            outlier_n = min(len(out), int(round(len(out) * outlier_ratio)))
+            if outlier_n > 0:
+                outlier_idx = self.rng.choice(len(out), size=outlier_n, replace=False)
+                expand = 0.15 * span + 0.05 * diag
+                low = bbox_min - expand
+                high = bbox_max + expand
+                high = np.maximum(high, low + 1e-6)
+                out[outlier_idx] = self.rng.uniform(low=low, high=high, size=(outlier_n, 3))
 
         # Keep row perturbation count stable unless density downsample is explicitly enabled.
         if len(out) > n_src:
@@ -795,6 +811,7 @@ class PCRARDatasetGenerator:
         missing_set = self._normalize_missing_positions(missing_positions)
         self._validate_missing_positions(missing_set)
         missing_positions_sorted = sorted(missing_set)
+        selected_perturbation_type = self._sample_single_perturbation_type(params, params_v)
 
         grid_paths: List[List[Optional[str]]] = [[None for _ in range(3)] for _ in range(3)]
         grid_clouds: List[List[Optional[np.ndarray]]] = [[None for _ in range(3)] for _ in range(3)]
@@ -810,6 +827,7 @@ class PCRARDatasetGenerator:
                     row_idx=r,
                     params_h=params,
                     params_v=params_v,
+                    perturbation_type=selected_perturbation_type,
                 )
                 write_ply(path, points, color=GRID_COLOR_MAP.get((r, c), (200, 200, 200)))
                 grid_paths[r][c] = f"{sample_id}/{filename}"
@@ -855,6 +873,8 @@ class PCRARDatasetGenerator:
             "n_points": self.config.n_points,
             "point_cloud_row_perturbation": {
                 "enabled": bool(self.config.enable_row_perturbation),
+                "single_type_per_sample": True,
+                "selected_type": selected_perturbation_type,
                 "apply_density_perturb_on_density_rules": bool(self.config.apply_density_perturb_on_density_rules),
                 "rows": {
                     "index_0_row1": {
