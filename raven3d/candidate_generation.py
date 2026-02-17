@@ -14,7 +14,7 @@ from .matrix_grid import (
     check_consistent_with_alt_relation,
     check_consistent_with_true_relation,
 )
-from .pcrar_entity import PCRAREntity, density_point_count, entities_equal, sample_random_entity
+from .pcrar_entity import PCRAREntity, entities_equal, sample_random_entity
 from .pcrar_rules import PCRARRule, RuleParams, RuleTemplate, get_rule
 
 
@@ -49,7 +49,7 @@ def _perturb_from_gt(
 ) -> PCRAREntity:
     out = gt.copy()
     leaves = out.get_leaves()
-    methods = ["size", "delta", "density", "pose", "slot", "shape"]
+    methods = ["size", "delta", "pose", "slot", "shape"]
     rng.shuffle(methods)
     for method in methods:
         if method == "size" and leaves:
@@ -65,13 +65,6 @@ def _perturb_from_gt(
             nxt = _neighbor_index(cur, len(level_cfg.delta_levels), int(rng.choice([-1, 1])))
             if nxt != cur:
                 leaves[idx].delta_level = level_cfg.delta_levels[nxt]
-                return out
-        elif method == "density":
-            cur = level_cfg.density_indices.index(out.obs.density_preset_idx)
-            nxt = _neighbor_index(cur, len(level_cfg.density_indices), int(rng.choice([-1, 1])))
-            if nxt != cur:
-                out.obs.density_preset_idx = int(level_cfg.density_indices[nxt])
-                out.obs.n_points = density_point_count(out.obs.density_preset_idx)
                 return out
         elif method == "pose":
             pose = list(out.obs.global_pose_deg)

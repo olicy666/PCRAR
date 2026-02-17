@@ -128,14 +128,14 @@ class ProgressionRule(PCRARRule):
     """Rule1 Progression（递进）
     
     同一属性沿固定步长变化：A→B 走一步，C→D 也走同一步
-    轴（四选一）：r(size_level +/-1)、R(pose +90deg 等)、p(slot shift +/-1 或 delta_level +/-1)、d(weights 档位 +/-1)
+    轴（三选一）：r(size_level +/-1)、R(pose +90deg 等)、p(slot shift +/-1 或 delta_level +/-1)
     """
     template = RuleTemplate.PROGRESSION
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.PROGRESSION]
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
         # 随机选择轴
-        axis = _choice_from_list(rng, ["r", "R", "p", "d"])
+        axis = _choice_from_list(rng, ["r", "R", "p"])
         # 随机方向
         direction = _choice_from_list(rng, [-1, 1])
         rot_axis = _choice_from_list(rng, ["x", "y", "z"]) if axis == "R" else None
@@ -179,10 +179,8 @@ class ProgressionRule(PCRARRule):
                     return False
             return True
         elif params.axis == "d":
-            # 密度档位
-            from .pcrar_entity import DENSITY_POINT_PRESETS
-            new_idx = entity.obs.density_preset_idx + direction
-            return 0 <= new_idx < len(DENSITY_POINT_PRESETS)
+            # 密度轴已下线，不再用于出题。
+            return False
         
         return True
     
@@ -295,7 +293,6 @@ class CopyRule(PCRARRule):
     
     按左右顺序做循环拷贝（正向/逆向）：
     - 尺寸拷贝：要求全部形状相同、尺寸全不同
-    - 密度拷贝：要求全部形状相同、尺寸全部相同（拷贝 part_sampling_weights）
     - 形状拷贝：允许不同形状
     """
     template = RuleTemplate.COPY
@@ -312,8 +309,6 @@ class CopyRule(PCRARRule):
         candidates = []
         if len(set(prims)) == 1 and len(set(sizes)) == 3:
             candidates.append("copy_size_cycle")
-        if len(set(prims)) == 1 and len(set(sizes)) == 1:
-            candidates.append("copy_density_cycle")
         if len(set(prims)) == 3:
             candidates.append("copy_shape_cycle")
 
@@ -343,11 +338,8 @@ class CopyRule(PCRARRule):
             # 尺寸拷贝：形状必须相同，尺寸必须全不同
             return len(set(prims)) == 1 and len(set(sizes)) == 3
         if params.axis == "copy_density_cycle":
-            # 密度拷贝：形状必须相同、尺寸必须相同，且三份密度权重可区分
-            if len(set(prims)) != 1 or len(set(sizes)) != 1:
-                return False
-            weights = _get_density_weights(entity, len(leaves))
-            return len(set(float(w) for w in weights)) == 3
+            # 密度拷贝轴已下线，不再用于出题。
+            return False
         if params.axis == "copy_shape_cycle":
             # 形状拷贝：三种形状全不同
             return len(set(prims)) == 3
@@ -624,20 +616,13 @@ class SymmetryRule(PCRARRule):
     """Rule7 Symmetry（对称）
     
     仅在 2 个 leaf 上应用：
-    - A→B 左做 +Δ，则右做 -Δ（作用于 R/r/d）
+    - A→B 左做 +Δ，则右做 -Δ（作用于 R/r）
     """
     template = RuleTemplate.SYMMETRY
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.SYMMETRY]
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
-        axis = _choice_from_list(rng, ["R", "r", "d"])  # 姿态/尺寸/密度
-        if axis == "d":
-            direction = int(_choice_from_list(rng, [-1, 1]))
-            return RuleParams(
-                template=self.template,
-                axis=axis,
-                direction=direction,
-            )
+        axis = _choice_from_list(rng, ["R", "r"])  # 姿态/尺寸
         left_idx, right_idx = self._pick_left_right(entity)
         return RuleParams(
             template=self.template,
@@ -653,14 +638,8 @@ class SymmetryRule(PCRARRule):
             return False
 
         if params.axis == "d":
-            left_idx, right_idx = self._pick_left_right(entity)
-            direction = 1 if int(params.direction) >= 0 else -1
-            weights = _get_density_weights(entity, len(leaves))
-            step = float(SYMMETRY_DENSITY_WEIGHT_STEP)
-            left_new = float(weights[left_idx]) + direction * step
-            right_new = float(weights[right_idx]) - direction * step
-            eps = 1e-9
-            return (-eps <= left_new <= 1.0 + eps) and (-eps <= right_new <= 1.0 + eps)
+            # 密度轴已下线，不再用于出题。
+            return False
 
         left_idx, right_idx = params.leaf_idx, params.direction
         if left_idx is None or right_idx is None:
@@ -832,26 +811,18 @@ def generate_distractor(
     
     if method == "different_axis" and params.axis:
         # 使用不同的属性轴
-        axes = ["r", "R", "p", "d"]
+        axes = ["r", "R", "p"]
         if params.template == RuleTemplate.SYMMETRY:
-            axes = ["R", "r", "d"]
+            axes = ["R", "r"]
         other_axes = [a for a in axes if a != params.axis]
         if other_axes:
             new_axis = _choice_from_list(rng, other_axes)
-            if params.template == RuleTemplate.SYMMETRY and new_axis == "d":
-                # Symmetry 的密度轴使用方向步进
-                new_params = RuleParams(
-                    template=params.template,
-                    axis=new_axis,
-                    direction=int(_choice_from_list(rng, [-1, 1])),
-                )
-            else:
-                new_params = RuleParams(
-                    template=params.template,
-                    axis=new_axis,
-                    leaf_idx=params.leaf_idx,
-                    direction=params.direction,
-                )
+            new_params = RuleParams(
+                template=params.template,
+                axis=new_axis,
+                leaf_idx=params.leaf_idx,
+                direction=params.direction,
+            )
             if rule.can_apply(distractor, new_params):
                 distractor = rule.apply(distractor, new_params)
                 reason = f"应用了错误的属性轴 {new_axis}，正确应为 {params.axis}"

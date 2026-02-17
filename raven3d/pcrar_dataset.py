@@ -75,6 +75,16 @@ class PCRARConfig:
     generate_confusing_view: bool = True
     view_image_size: Tuple[int, int] = (512, 512)
     rule_filter: Optional[Set[RuleTemplate]] = None
+    enable_row_perturbation: bool = True
+    apply_density_perturb_on_density_rules: bool = False
+    row2_density_keep_ratio: float = 0.75
+    row3_density_keep_ratio: float = 0.5
+    row2_jitter_std_ratio: float = 0.003
+    row3_jitter_std_ratio: float = 0.009
+    row2_quantize_step_ratio: float = 0.005
+    row3_quantize_step_ratio: float = 0.015
+    row2_outlier_replace_ratio: float = 0.01
+    row3_outlier_replace_ratio: float = 0.04
 
     # Legacy path compatibility
     legacy_enabled: bool = False
@@ -146,9 +156,8 @@ class PCRARDatasetGenerator:
         mode_map = {
             "copy_shape_cycle": 0,
             "copy_size_cycle": 1,
-            "copy_density_cycle": 2,
         }
-        mode = mode_map.get(preferred_axis, int(self.rng.integers(3)))
+        mode = mode_map.get(preferred_axis, int(self.rng.integers(2)))
         if mode == 0:
             # copy_shape_cycle: 3 distinct shapes
             for i, leaf in enumerate(leaves):
@@ -176,14 +185,9 @@ class PCRARDatasetGenerator:
                     leaf.slot = int(slots[i])
             enforce_leaf_separation(leaves)
         else:
-            # copy_density_cycle: same shape, same size, distinguishable weights
-            base = leaves[0].prim_type
-            for leaf in leaves:
-                leaf.prim_type = base
-            base_size = leaves[0].size_level
-            for leaf in leaves:
-                leaf.size_level = base_size
-            entity.obs.part_sampling_weights = [0.5, 0.3125, 0.1875]
+            # Defensive fallback: only shape/size copy axes are supported.
+            for i, leaf in enumerate(leaves):
+                leaf.prim_type = PRIM_TYPE_CYCLE[i % len(PRIM_TYPE_CYCLE)]
 
     @staticmethod
     def _min_unique_threshold(rule: PCRARRule) -> int:
@@ -237,6 +241,99 @@ class PCRARDatasetGenerator:
     @staticmethod
     def _build_observation_mask(missing_positions: Set[Tuple[int, int]]) -> List[List[bool]]:
         return [[(r, c) not in missing_positions for c in range(3)] for r in range(3)]
+
+    @staticmethod
+    def _safe_bbox_diag(points: np.ndarray) -> float:
+        if len(points) == 0:
+            return 1.0
+        span = np.max(points, axis=0) - np.min(points, axis=0)
+        diag = float(np.linalg.norm(span))
+        return max(diag, 1e-6)
+
+    @staticmethod
+    def _rule_uses_density(params: Optional[RuleParams]) -> bool:
+        if params is None:
+            return False
+        if params.template == RuleTemplate.PROGRESSION and params.axis == "d":
+            return True
+        if params.template == RuleTemplate.SYMMETRY and params.axis == "d":
+            return True
+        if params.template == RuleTemplate.COPY and params.axis == "copy_density_cycle":
+            return True
+        return False
+
+    def _allow_density_perturbation(
+        self,
+        params_h: RuleParams,
+        params_v: Optional[RuleParams],
+    ) -> bool:
+        if self.config.apply_density_perturb_on_density_rules:
+            return True
+        return not (self._rule_uses_density(params_h) or self._rule_uses_density(params_v))
+
+    def _apply_point_cloud_perturbation(
+        self,
+        points: np.ndarray,
+        row_idx: int,
+        params_h: RuleParams,
+        params_v: Optional[RuleParams],
+    ) -> np.ndarray:
+        if not self.config.enable_row_perturbation:
+            return points
+        if row_idx <= 0:
+            return points
+
+        if row_idx == 1:
+            keep_ratio = float(self.config.row2_density_keep_ratio)
+            jitter_ratio = float(self.config.row2_jitter_std_ratio)
+            quantize_ratio = float(self.config.row2_quantize_step_ratio)
+            outlier_ratio = float(self.config.row2_outlier_replace_ratio)
+        else:
+            keep_ratio = float(self.config.row3_density_keep_ratio)
+            jitter_ratio = float(self.config.row3_jitter_std_ratio)
+            quantize_ratio = float(self.config.row3_quantize_step_ratio)
+            outlier_ratio = float(self.config.row3_outlier_replace_ratio)
+
+        out = points.copy()
+        n_src = len(out)
+        if n_src == 0:
+            return out
+
+        bbox_min = np.min(out, axis=0)
+        bbox_max = np.max(out, axis=0)
+        span = bbox_max - bbox_min
+        diag = self._safe_bbox_diag(out)
+
+        keep_ratio = float(np.clip(keep_ratio, 0.05, 1.0))
+        if keep_ratio < 0.999 and self._allow_density_perturbation(params_h, params_v):
+            keep_n = max(32, int(round(len(out) * keep_ratio)))
+            if keep_n < len(out):
+                keep_idx = self.rng.choice(len(out), size=keep_n, replace=False)
+                out = out[keep_idx]
+
+        jitter_std = max(0.0, jitter_ratio) * diag
+        if jitter_std > 0.0:
+            out = out + self.rng.normal(loc=0.0, scale=jitter_std, size=out.shape)
+
+        quant_step = max(0.0, quantize_ratio) * diag
+        if quant_step > 0.0:
+            out = np.round(out / quant_step) * quant_step
+
+        outlier_ratio = float(np.clip(outlier_ratio, 0.0, 0.9))
+        outlier_n = min(len(out), int(round(len(out) * outlier_ratio)))
+        if outlier_n > 0:
+            outlier_idx = self.rng.choice(len(out), size=outlier_n, replace=False)
+            expand = 0.15 * span + 0.05 * diag
+            low = bbox_min - expand
+            high = bbox_max + expand
+            high = np.maximum(high, low + 1e-6)
+            out[outlier_idx] = self.rng.uniform(low=low, high=high, size=(outlier_n, 3))
+
+        # Keep row perturbation count stable unless density downsample is explicitly enabled.
+        if len(out) > n_src:
+            idx = self.rng.choice(len(out), size=n_src, replace=False)
+            out = out[idx]
+        return out
 
     @staticmethod
     def _build_symmetry_vertical_params(params_h: RuleParams) -> RuleParams:
@@ -708,6 +805,12 @@ class PCRARDatasetGenerator:
                 filename = f"grid_{r}_{c}.ply"
                 path = sample_dir / filename
                 points = grid[r][c].sample_point_cloud(self.rng, n_points=None)
+                points = self._apply_point_cloud_perturbation(
+                    points,
+                    row_idx=r,
+                    params_h=params,
+                    params_v=params_v,
+                )
                 write_ply(path, points, color=GRID_COLOR_MAP.get((r, c), (200, 200, 200)))
                 grid_paths[r][c] = f"{sample_id}/{filename}"
                 grid_clouds[r][c] = points
@@ -750,6 +853,30 @@ class PCRARDatasetGenerator:
             "K_max": int(k_max),
             "matrix_level_config": self.level_cfg.to_dict(),
             "n_points": self.config.n_points,
+            "point_cloud_row_perturbation": {
+                "enabled": bool(self.config.enable_row_perturbation),
+                "apply_density_perturb_on_density_rules": bool(self.config.apply_density_perturb_on_density_rules),
+                "rows": {
+                    "index_0_row1": {
+                        "density_keep_ratio": 1.0,
+                        "jitter_std_ratio": 0.0,
+                        "quantize_step_ratio": 0.0,
+                        "outlier_replace_ratio": 0.0,
+                    },
+                    "index_1_row2": {
+                        "density_keep_ratio": float(self.config.row2_density_keep_ratio),
+                        "jitter_std_ratio": float(self.config.row2_jitter_std_ratio),
+                        "quantize_step_ratio": float(self.config.row2_quantize_step_ratio),
+                        "outlier_replace_ratio": float(self.config.row2_outlier_replace_ratio),
+                    },
+                    "index_2_row3": {
+                        "density_keep_ratio": float(self.config.row3_density_keep_ratio),
+                        "jitter_std_ratio": float(self.config.row3_jitter_std_ratio),
+                        "quantize_step_ratio": float(self.config.row3_quantize_step_ratio),
+                        "outlier_replace_ratio": float(self.config.row3_outlier_replace_ratio),
+                    },
+                },
+            },
             "rule": {
                 "template": rule.template.value,
                 "source_align": RULE_SOURCE_ALIGN.get(rule.template, []),
@@ -922,7 +1049,7 @@ class PCRARDatasetGenerator:
             and len(self.config.rule_filter) == 1
             and RuleTemplate.COPY in self.config.rule_filter
         ):
-            axes = ["copy_size_cycle", "copy_density_cycle", "copy_shape_cycle"]
+            axes = ["copy_size_cycle", "copy_shape_cycle"]
             base = num_samples // len(axes)
             remainder = num_samples % len(axes)
             copy_axis_plan = []
@@ -937,7 +1064,7 @@ class PCRARDatasetGenerator:
             preferred_axis = copy_axis_plan[idx] if copy_axis_plan else None
             per_sample_attempts = max_attempts
             if preferred_axis:
-                # 目标轴约束下适当放宽重试次数，保证三类题比例可达
+                # 目标轴约束下适当放宽重试次数，保证轴分布可达
                 per_sample_attempts = 120
             for _ in range(per_sample_attempts):
                 try:
