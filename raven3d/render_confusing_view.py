@@ -26,21 +26,30 @@ class ConfusingViewGenerator:
         params: RuleParams,
         entities: List[PCRAREntity],
     ) -> Dict[str, Any]:
-        if rule_template == RuleTemplate.PROGRESSION:
-            return self._confusing_view_progression(params, entities)
-        if rule_template == RuleTemplate.CYCLE:
-            return self._confusing_view_cycle(params, entities)
-        if rule_template == RuleTemplate.COUNT:
-            return self._confusing_view_count(params, entities)
-        if rule_template == RuleTemplate.CONSERVATION:
-            return self._confusing_view_conservation(params, entities)
-        if rule_template == RuleTemplate.PERMUTATION:
-            return self._confusing_view_permutation(params, entities)
-        if rule_template == RuleTemplate.SYMMETRY:
-            return self._confusing_view_symmetry(params, entities)
-        if rule_template == RuleTemplate.COPY:
-            return self._confusing_view_copy(params, entities)
-        return self._default_confusing_view()
+        del rule_template, params, entities
+        return self._random_three_viewpoint()
+
+    def _random_three_viewpoint(self) -> Dict[str, Any]:
+        yaw_deg = float(self.rng.choice(np.array([-45.0, 0.0, 45.0], dtype=float)))
+        yaw_rad = np.radians(yaw_deg)
+        radius = 7.0
+        cam_pos = (
+            float(radius * np.sin(yaw_rad)),
+            0.0,
+            float(radius * np.cos(yaw_rad)),
+        )
+        label_map = {-45.0: "left", 0.0: "center", 45.0: "right"}
+        label = label_map.get(yaw_deg, "center")
+        return {
+            "camera_position": cam_pos,
+            "camera_target": (0.0, 0.0, 0.0),
+            "camera_up": (0.0, 1.0, 0.0),
+            "fov": 35.0,
+            "view_label": label,
+            "yaw_degrees": yaw_deg,
+            "confusion_reason": f"random three-view selection: {label} ({yaw_deg:+.0f} deg)",
+            "confusion_level": "medium",
+        }
 
     def _confusing_view_progression(
         self,
