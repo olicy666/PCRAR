@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .csg import PRIM_TYPE_CYCLE
+from .csg import OpType, PRIM_TYPE_CYCLE
 from .matrix_grid import (
     MatrixLevelConfig,
     apply_k,
@@ -93,11 +93,79 @@ def _make_irrelevant(
     rng: np.random.Generator,
 ) -> PCRAREntity:
     leaf_count = max(1, context_anchor.leaf_count())
-    entity = sample_random_entity(rng, leaf_count=leaf_count)
+    entity = sample_random_entity(rng, leaf_count=leaf_count, allowed_ops=[OpType.UNION])
     leaves = entity.get_leaves()
     if leaves:
         leaves[0].prim_type = PRIM_TYPE_CYCLE[(PRIM_TYPE_CYCLE.index(leaves[0].prim_type) + 2) % len(PRIM_TYPE_CYCLE)]
     return entity
+
+
+def _sample_count_only_candidate(
+    grid_context: List[List[Optional[PCRAREntity]]],
+    gt: PCRAREntity,
+    rng: np.random.Generator,
+) -> Optional[PCRAREntity]:
+    """Generate a candidate using only Count-rule transitions."""
+    count_rule = get_rule(RuleTemplate.COUNT)
+
+    sources: List[PCRAREntity] = [gt]
+    for row in grid_context:
+        for item in row:
+            if item is not None:
+                sources.append(item)
+    rng.shuffle(sources)
+
+    for src in sources:
+        for _ in range(12):
+            direction = int(rng.choice([-1, 1]))
+            steps = int(rng.choice([1, 2]))
+            params = RuleParams(
+                template=RuleTemplate.COUNT,
+                axis="count",
+                direction=direction,
+            )
+            if not can_apply_k(src, count_rule, params, steps):
+                continue
+            try:
+                return apply_k(src, count_rule, params, steps)
+            except RuntimeError:
+                continue
+    return None
+
+
+def _enumerate_count_only_candidates(
+    grid_context: List[List[Optional[PCRAREntity]]],
+    gt: PCRAREntity,
+    rng: np.random.Generator,
+) -> List[PCRAREntity]:
+    """Enumerate unique candidates produced only by Count transitions."""
+    count_rule = get_rule(RuleTemplate.COUNT)
+    sources: List[PCRAREntity] = [gt]
+    for row in grid_context:
+        for item in row:
+            if item is not None:
+                sources.append(item)
+
+    out: List[PCRAREntity] = []
+    for src in sources:
+        for direction in (-1, 1):
+            for steps in (1, 2):
+                params = RuleParams(
+                    template=RuleTemplate.COUNT,
+                    axis="count",
+                    direction=direction,
+                )
+                if not can_apply_k(src, count_rule, params, steps):
+                    continue
+                try:
+                    cand = apply_k(src, count_rule, params, steps)
+                except RuntimeError:
+                    continue
+                if _is_duplicate(cand, out):
+                    continue
+                out.append(cand)
+    rng.shuffle(out)
+    return out
 
 
 def _sample_alt_rule_candidate(
@@ -208,6 +276,9 @@ def generate_candidates(
     # 1) analogical-but-wrong-relation
     analogical_added = 0
     attempts = 0
+    alt_template_whitelist = list(rule_whitelist) if rule_whitelist is not None else None
+    if true_rule.template == RuleTemplate.COUNT:
+        alt_template_whitelist = [RuleTemplate.COUNT]
     while analogical_added < mix_cfg.min_analogical_wrong_relation and attempts < 200:
         attempts += 1
         sampled = _sample_alt_rule_candidate(
@@ -218,7 +289,7 @@ def generate_candidates(
             k_h,
             k_v,
             rng,
-            template_whitelist=rule_whitelist,
+            template_whitelist=alt_template_whitelist,
             true_rule_v=true_rule_v,
             true_params_v=true_params_v,
         )
@@ -251,7 +322,12 @@ def generate_candidates(
     for _ in range(120):
         if perceptual_added >= mix_cfg.min_perceptual_plausible:
             break
-        cand = _perturb_from_gt(gt_entity, level_cfg, rng)
+        if true_rule.template == RuleTemplate.COUNT:
+            cand = _sample_count_only_candidate(grid_context, gt_entity, rng)
+            if cand is None:
+                continue
+        else:
+            cand = _perturb_from_gt(gt_entity, level_cfg, rng)
         if entities_equal(cand, gt_entity, check_obs=True) or _is_duplicate(cand, candidates):
             continue
         if enforce_structure_diversity and (
@@ -274,7 +350,10 @@ def generate_candidates(
             continue
         candidates.append(cand)
         candidate_types.append("perceptual_plausible")
-        distractor_notes.append("外观上接近目标格，但不满足真实/替代关系")
+        if true_rule.template == RuleTemplate.COUNT:
+            distractor_notes.append("数量干扰项：仅改变几何体数量，不满足真实/替代关系")
+        else:
+            distractor_notes.append("外观上接近目标格，但不满足真实/替代关系")
         perceptual_added += 1
 
     if perceptual_added < mix_cfg.min_perceptual_plausible:
@@ -285,7 +364,12 @@ def generate_candidates(
     attempts = 0
     while len(candidates) < num_options - 1 and attempts < max_attempts:
         attempts += 1
-        cand = _make_irrelevant(grid_context[0][0] or gt_entity, rng)
+        if true_rule.template == RuleTemplate.COUNT:
+            cand = _sample_count_only_candidate(grid_context, gt_entity, rng)
+            if cand is None:
+                continue
+        else:
+            cand = _make_irrelevant(grid_context[0][0] or gt_entity, rng)
         if _is_duplicate(cand, candidates) or entities_equal(cand, gt_entity, check_obs=True):
             continue
         if enforce_structure_diversity and (
@@ -308,10 +392,34 @@ def generate_candidates(
             continue
         candidates.append(cand)
         candidate_types.append("irrelevant")
-        distractor_notes.append("与目标域风格或关系明显不一致")
+        if true_rule.template == RuleTemplate.COUNT:
+            distractor_notes.append("数量干扰项：仅改变几何体数量")
+        else:
+            distractor_notes.append("与目标域风格或关系明显不一致")
 
     if len(candidates) < num_options - 1:
-        raise RuntimeError("Failed to generate enough irrelevant candidates")
+        if true_rule.template == RuleTemplate.COUNT:
+            for cand in _enumerate_count_only_candidates(grid_context, gt_entity, rng):
+                if len(candidates) >= num_options - 1:
+                    break
+                if _is_duplicate(cand, candidates) or entities_equal(cand, gt_entity, check_obs=True):
+                    continue
+                if check_consistent_with_true_relation(
+                    cand,
+                    grid_context,
+                    true_rule,
+                    true_params,
+                    k_h,
+                    k_v,
+                    vertical_rule=true_rule_v,
+                    vertical_params=true_params_v,
+                ):
+                    continue
+                candidates.append(cand)
+                candidate_types.append("irrelevant")
+                distractor_notes.append("数量干扰项：仅改变几何体数量")
+        if len(candidates) < num_options - 1:
+            raise RuntimeError("Failed to generate enough irrelevant candidates")
 
     # insert GT and shuffle
     gt_index = int(rng.integers(num_options))
