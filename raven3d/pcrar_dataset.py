@@ -660,7 +660,6 @@ class PCRARDatasetGenerator:
                 f"Horizontal relation E[r,c+1]=T_h^{int(k_h)}(E[r,c]); "
                 f"vertical relation E[r+1,c]=T_v^{int(k_v)}(E[r,c])."
             )
-
         if template == RuleTemplate.PROGRESSION:
             if axis == "r":
                 per_t = f"all leaves change size_level by {_shift_word(int(params.direction))} per T"
