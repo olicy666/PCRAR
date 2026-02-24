@@ -88,6 +88,34 @@ def _perturb_from_gt(
     return out
 
 
+def _perturb_cycle_shape_only(
+    base: PCRAREntity,
+    rng: np.random.Generator,
+    step_choices: Sequence[int],
+    max_changes: int,
+) -> PCRAREntity:
+    out = base.copy()
+    leaves = out.get_leaves()
+    if not leaves:
+        return out
+
+    cycle_len = len(PRIM_TYPE_CYCLE)
+    valid_steps = [int(step) for step in step_choices if int(step) % cycle_len != 0]
+    if not valid_steps:
+        valid_steps = [1]
+
+    limit = max(1, min(int(max_changes), len(leaves)))
+    change_count = int(rng.integers(1, limit + 1))
+    change_indices = rng.choice(len(leaves), size=change_count, replace=False)
+
+    for idx in change_indices:
+        leaf = leaves[int(idx)]
+        cur = PRIM_TYPE_CYCLE.index(leaf.prim_type)
+        step = int(rng.choice(valid_steps))
+        leaf.prim_type = PRIM_TYPE_CYCLE[(cur + step) % cycle_len]
+    return out
+
+
 def _make_irrelevant(
     context_anchor: PCRAREntity,
     rng: np.random.Generator,
@@ -279,6 +307,8 @@ def generate_candidates(
     alt_template_whitelist = list(rule_whitelist) if rule_whitelist is not None else None
     if true_rule.template == RuleTemplate.COUNT:
         alt_template_whitelist = [RuleTemplate.COUNT]
+    elif true_rule.template == RuleTemplate.CYCLE:
+        alt_template_whitelist = [RuleTemplate.CYCLE]
     while analogical_added < mix_cfg.min_analogical_wrong_relation and attempts < 200:
         attempts += 1
         sampled = _sample_alt_rule_candidate(
@@ -326,6 +356,13 @@ def generate_candidates(
             cand = _sample_count_only_candidate(grid_context, gt_entity, rng)
             if cand is None:
                 continue
+        elif true_rule.template == RuleTemplate.CYCLE:
+            cand = _perturb_cycle_shape_only(
+                gt_entity,
+                rng,
+                step_choices=(-1, 1),
+                max_changes=1,
+            )
         else:
             cand = _perturb_from_gt(gt_entity, level_cfg, rng)
         if entities_equal(cand, gt_entity, check_obs=True) or _is_duplicate(cand, candidates):
@@ -352,6 +389,8 @@ def generate_candidates(
         candidate_types.append("perceptual_plausible")
         if true_rule.template == RuleTemplate.COUNT:
             distractor_notes.append("数量干扰项：仅改变几何体数量，不满足真实/替代关系")
+        elif true_rule.template == RuleTemplate.CYCLE:
+            distractor_notes.append("形状干扰项：仅改变 primitive_type，不满足真实/替代关系")
         else:
             distractor_notes.append("外观上接近目标格，但不满足真实/替代关系")
         perceptual_added += 1
@@ -368,6 +407,13 @@ def generate_candidates(
             cand = _sample_count_only_candidate(grid_context, gt_entity, rng)
             if cand is None:
                 continue
+        elif true_rule.template == RuleTemplate.CYCLE:
+            cand = _perturb_cycle_shape_only(
+                gt_entity,
+                rng,
+                step_choices=(2,),
+                max_changes=gt_entity.leaf_count(),
+            )
         else:
             cand = _make_irrelevant(grid_context[0][0] or gt_entity, rng)
         if _is_duplicate(cand, candidates) or entities_equal(cand, gt_entity, check_obs=True):
@@ -394,6 +440,8 @@ def generate_candidates(
         candidate_types.append("irrelevant")
         if true_rule.template == RuleTemplate.COUNT:
             distractor_notes.append("数量干扰项：仅改变几何体数量")
+        elif true_rule.template == RuleTemplate.CYCLE:
+            distractor_notes.append("形状干扰项：仅改变 primitive_type")
         else:
             distractor_notes.append("与目标域风格或关系明显不一致")
 
