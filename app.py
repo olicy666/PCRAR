@@ -66,7 +66,12 @@ def get_mode_description(mode: str) -> str:
     return f"{rule_name} ({template.value})"
 
 MODE_IDS = generate_mode_list()
-RECORD_COLUMNS = ["username", "mode", "score", "total", "accuracy", "reason", "result_path"]
+DIFFICULTY_IDS = ["easy", "hard"]
+DIFFICULTY_LABELS = {
+    "easy": "简单（Easy）",
+    "hard": "困难（Hard）",
+}
+RECORD_COLUMNS = ["username", "mode", "difficulty", "score", "total", "accuracy", "reason", "result_path"]
 
 
 def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: int = 0) -> None:
@@ -383,8 +388,8 @@ def pl_multi_component(
     components.html(html, height=height)
 
 
-def stable_seed(username: str, mode: str) -> int:
-    key = f"{username}|{mode}".encode("utf-8")
+def stable_seed(username: str, mode: str, difficulty: str) -> int:
+    key = f"{username}|{mode}|{difficulty}".encode("utf-8")
     digest = hashlib.sha256(key).digest()
     return int.from_bytes(digest[:8], "big") % (2**32 - 1)
 
@@ -395,6 +400,7 @@ def init_state() -> None:
         "is_admin": False,
         "username": "",
         "mode": MODE_IDS[0] if MODE_IDS else "",
+        "difficulty": "hard",
         "question_index": 0,
         "answers": {},
         "exam_generated": False,
@@ -415,6 +421,8 @@ def init_state() -> None:
             st.session_state[key] = value
     if MODE_IDS and st.session_state.get("mode") not in MODE_IDS:
         st.session_state["mode"] = MODE_IDS[0]
+    if st.session_state.get("difficulty") not in DIFFICULTY_IDS:
+        st.session_state["difficulty"] = "hard"
 
 
 def reset_exam_state() -> None:
@@ -459,14 +467,14 @@ def reset_exam_state() -> None:
             st.session_state.pop(f"merge_candidate_{idx}_{label}", None)
 
 
-def generate_exam(username: str, mode: str) -> None:
+def generate_exam(username: str, mode: str, difficulty: str) -> None:
     """生成 PCRAR 考试试卷"""
     reset_exam_state()
     temp_dir_obj = tempfile.TemporaryDirectory()
     exam_dir = Path(temp_dir_obj.name)
     st.session_state.temp_dir_obj = temp_dir_obj
     st.session_state.exam_dir = str(exam_dir)
-    seed = stable_seed(username, mode)
+    seed = stable_seed(username, mode, difficulty)
     st.session_state.seed = seed
     
     # 解析规则
@@ -476,6 +484,7 @@ def generate_exam(username: str, mode: str) -> None:
         n_points=POINTS_PER_CLOUD,
         num_options=4,
         rule_filter={rule_template},
+        matrix_missing_one_per_row=(difficulty != "easy"),
     )
     generator = PCRARDatasetGenerator(config=config, seed=seed)
     try:
@@ -525,7 +534,11 @@ def resolve_ply_path(exam_root: Path, relative_path: str) -> Path:
 
 
 def build_result(
-    username: str, mode: str, meta: List[Dict], answers: Dict[int, str]
+    username: str,
+    mode: str,
+    difficulty: str,
+    meta: List[Dict],
+    answers: Dict[int, str],
 ) -> Dict:
     details = []
     correct_count = 0
@@ -582,6 +595,7 @@ def build_result(
     return {
         "username": username,
         "mode": mode,
+        "difficulty": difficulty,
         "total": total,
         "score": correct_count,
         "accuracy": round(accuracy, 4),
@@ -640,7 +654,7 @@ def render_admin() -> None:
     option_labels = []
     for idx, row in df.iterrows():
         label = (
-            f"{idx + 1}: {row.get('username', '')} | {row.get('mode', '')} | "
+            f"{idx + 1}: {row.get('username', '')} | {row.get('mode', '')} | {row.get('difficulty', '')} | "
             f"{row.get('score', '')}/{row.get('total', '')} | {row.get('accuracy', '')}"
         )
         option_labels.append(label)
@@ -670,7 +684,7 @@ def render_admin() -> None:
         options = []
         for idx, row in downloadable.iterrows():
             label = (
-                f"{idx + 1}: {row.get('username', '')} | {row.get('mode', '')} | "
+                f"{idx + 1}: {row.get('username', '')} | {row.get('mode', '')} | {row.get('difficulty', '')} | "
                 f"{row.get('score', '')}/{row.get('total', '')}"
             )
             options.append(label)
@@ -736,14 +750,32 @@ def render_exam() -> None:
         st.session_state.mode = new_mode
         reset_exam_state()
         st.sidebar.info("已切换模式，请重新生成试卷。")
+
+    current_difficulty = st.session_state.difficulty
+    diff_idx = DIFFICULTY_IDS.index(current_difficulty) if current_difficulty in DIFFICULTY_IDS else 1
+    new_difficulty = st.sidebar.selectbox(
+        "难度",
+        DIFFICULTY_IDS,
+        index=diff_idx,
+        format_func=lambda x: DIFFICULTY_LABELS.get(x, x),
+    )
+    if new_difficulty != st.session_state.difficulty:
+        st.session_state.difficulty = new_difficulty
+        reset_exam_state()
+        st.sidebar.info("已切换难度，请重新生成试卷。")
     
     # 显示当前模式描述
     st.sidebar.caption(get_mode_description(st.session_state.mode))
+    st.sidebar.caption(f"难度：{DIFFICULTY_LABELS.get(st.session_state.difficulty, st.session_state.difficulty)}")
 
     button_label = "生成试卷" if not st.session_state.exam_generated else "重新生成试卷"
     if st.sidebar.button(button_label):
         with st.spinner("生成题目中..."):
-            generate_exam(st.session_state.username, st.session_state.mode)
+            generate_exam(
+                st.session_state.username,
+                st.session_state.mode,
+                st.session_state.difficulty,
+            )
         st.sidebar.success("试卷已生成。")
 
     if st.sidebar.button("退出登录"):
@@ -758,6 +790,8 @@ def render_exam() -> None:
         st.subheader("考试模式说明")
         st.markdown("""
         - **题型**: 3x3 九宫格矩阵补全（目标格固定右下角，可附加缺失格）
+        - **难度 easy**: 仅遮挡第9格（右下角）
+        - **难度 hard**: 随机遮挡3格（保留用于推理锚点）
         - **规则**: 同一规则实例 T 作用于整张矩阵
         - **步长**: 横向步长 k_h、纵向步长 k_v，按指数公式生成
         - **目标**: 从候选中选出唯一满足真实关系 T 的目标格
@@ -801,7 +835,11 @@ def render_exam() -> None:
     k_v = entry.get("k_v")
     
     st.subheader(f"题目 {idx + 1}/{TOTAL_QUESTIONS}")
-    st.caption(f"题型: {task_name} | 规则: {rule_template} | k_h={k_h}, k_v={k_v}")
+    st.caption(
+        "题型: "
+        f"{task_name} | 规则: {rule_template} | 难度: {DIFFICULTY_LABELS.get(st.session_state.difficulty, st.session_state.difficulty)}"
+        f" | k_h={k_h}, k_v={k_v}"
+    )
     st.download_button(
         "下载本题 meta.json",
         data=json.dumps(entry, ensure_ascii=False, indent=2),
@@ -947,6 +985,7 @@ def render_exam() -> None:
         result = build_result(
             st.session_state.username,
             st.session_state.mode,
+            st.session_state.difficulty,
             st.session_state.exam_meta,
             st.session_state.answers,
         )
@@ -957,13 +996,19 @@ def render_exam() -> None:
         result_path.write_text(st.session_state.result_json, encoding="utf-8")
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{safe_slug(st.session_state.username)}_{safe_slug(st.session_state.mode)}_{timestamp}.json"
+        filename = (
+            f"{safe_slug(st.session_state.username)}_"
+            f"{safe_slug(st.session_state.mode)}_"
+            f"{safe_slug(st.session_state.difficulty)}_"
+            f"{timestamp}.json"
+        )
         persistent_path = RESULTS_DIR / filename
         persistent_path.write_text(st.session_state.result_json, encoding="utf-8")
         if not st.session_state.result_saved:
             record = {
                 "username": st.session_state.username,
                 "mode": st.session_state.mode,
+                "difficulty": st.session_state.difficulty,
                 "score": result["score"],
                 "total": result["total"],
                 "accuracy": result["accuracy"],

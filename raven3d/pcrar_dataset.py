@@ -965,11 +965,19 @@ class PCRARDatasetGenerator:
             # 对称规则按相邻格一步递推：E[r,c+1] = T(E[r,c]), E[r+1,c] = T(E[r,c])
             k_pairs = [(1, 1)]
         else:
-            k_pairs = [
-                (int(kh), int(kv))
-                for kh in self.config.matrix_k_h_choices
-                for kv in self.config.matrix_k_v_choices
-            ]
+            # Enforce complementary stride granularity:
+            # horizontal one-step copy <-> vertical two-step copy, or vice versa.
+            h_choices = {int(x) for x in self.config.matrix_k_h_choices}
+            v_choices = {int(x) for x in self.config.matrix_k_v_choices}
+            k_pairs: List[Tuple[int, int]] = []
+            if 1 in h_choices and 2 in v_choices:
+                k_pairs.append((1, 2))
+            if 2 in h_choices and 1 in v_choices:
+                k_pairs.append((2, 1))
+            if not k_pairs:
+                raise RuntimeError(
+                    "matrix_k_h_choices/matrix_k_v_choices must support complementary strides (1,2) or (2,1)"
+                )
         self.rng.shuffle(k_pairs)
         last_err: Optional[Exception] = None
         for k_h, k_v in k_pairs:
