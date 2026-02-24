@@ -70,6 +70,9 @@ DELTA_LEVEL_MAP: Dict[DeltaLevel, float] = {
     DeltaLevel.VFAR: 0.90,
 }
 
+# Slot 位置步长放大系数：提升位置相关题目的可见性。
+SLOT_POSITION_SCALE = 1.6
+
 # 离散角度列表（度）
 DISCRETE_ANGLES = [0, 60, 120, 180, 240, 300]
 
@@ -106,7 +109,7 @@ class Leaf:
         # 让位移步长与当前尺寸绑定：单步位移 = ratio * width_x。
         # 对本项目基础 primitive（局部 x 范围 [-0.5, 0.5]）有 width_x = scale。
         delta_ratio = DELTA_LEVEL_MAP[self.delta_level]
-        delta = delta_ratio * self.get_scale()
+        delta = delta_ratio * self.get_scale() * SLOT_POSITION_SCALE
         return np.array([self.slot * delta, 0.0, 0.0])
 
     def get_rotation_matrix(self) -> np.ndarray:
