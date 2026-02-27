@@ -30,13 +30,28 @@ BIG_VIEW_CAMERA_FIT_MARGIN = 1.0
 # 规则名称映射
 RULE_NAMES = {
     RuleTemplate.PROGRESSION: "递进规则",
-    RuleTemplate.CYCLE: "循环规则",
-    RuleTemplate.COPY: "拷贝规则",
+    RuleTemplate.CYCLE: "循环规则（含拷贝）",
+    RuleTemplate.COPY: "循环规则（含拷贝）",
     RuleTemplate.COUNT: "增减规则",
     RuleTemplate.CONSERVATION: "守恒规则",
     RuleTemplate.PERMUTATION: "置换规则",
     RuleTemplate.SYMMETRY: "对称规则",
 }
+
+# Streamlit 端展示的规则集合：Copy 已并入 Cycle，不再单独出题。
+MODE_RULE_TEMPLATES: List[RuleTemplate] = [
+    RuleTemplate.PROGRESSION,
+    RuleTemplate.CYCLE,
+    RuleTemplate.COUNT,
+    RuleTemplate.CONSERVATION,
+    RuleTemplate.PERMUTATION,
+    RuleTemplate.SYMMETRY,
+]
+
+
+def canonical_template(template: RuleTemplate) -> RuleTemplate:
+    """规则模板规范化（兼容历史 Copy->Cycle）。"""
+    return RuleTemplate.CYCLE if template == RuleTemplate.COPY else template
 
 # 题型名称（固定为 matrix）
 TASK_TYPE_NAMES = {
@@ -47,7 +62,8 @@ TASK_TYPE_NAMES = {
 def generate_mode_list() -> List[str]:
     """生成模式列表：矩阵推理-规则1, ..."""
     modes = []
-    for idx, template in enumerate(RuleTemplate, 1):
+    for idx, template in enumerate(MODE_RULE_TEMPLATES, 1):
+        del template
         mode_id = f"矩阵推理-规则{idx}"
         modes.append(mode_id)
     return modes
@@ -55,15 +71,25 @@ def generate_mode_list() -> List[str]:
 # 模式 ID 到 (rule_template) 的映射
 def parse_mode(mode: str) -> RuleTemplate:
     """解析模式 ID，返回 rule_template"""
-    rule_num = int(mode.split("规则")[1])
-    template = list(RuleTemplate)[rule_num - 1]
-    return template
+    rule_num = int(mode.split("规则")[1]) - 1
+    if rule_num < 0 or rule_num >= len(MODE_RULE_TEMPLATES):
+        return MODE_RULE_TEMPLATES[0]
+    return MODE_RULE_TEMPLATES[rule_num]
 
 def get_mode_description(mode: str) -> str:
     """获取模式描述"""
     template = parse_mode(mode)
     rule_name = RULE_NAMES[template]
     return f"{rule_name} ({template.value})"
+
+
+def normalize_template_value(template_name: str, default: RuleTemplate) -> str:
+    """把 meta 中的规则名标准化为当前语义（Copy 归并到 Cycle）。"""
+    try:
+        tpl = RuleTemplate(template_name)
+    except Exception:
+        tpl = default
+    return canonical_template(tpl).value
 
 MODE_IDS = generate_mode_list()
 DIFFICULTY_IDS = ["easy", "hard"]
@@ -478,7 +504,7 @@ def generate_exam(username: str, mode: str, difficulty: str) -> None:
     st.session_state.seed = seed
     
     # 解析规则
-    rule_template = parse_mode(mode)
+    rule_template = canonical_template(parse_mode(mode))
     
     config = PCRARConfig(
         n_points=POINTS_PER_CLOUD,
@@ -498,10 +524,10 @@ def generate_exam(username: str, mode: str, difficulty: str) -> None:
     meta_path = exam_dir / "meta.json"
     exam_meta = json.loads(meta_path.read_text(encoding="utf-8"))
     # 校验规则过滤是否生效
-    expected_template = rule_template.value
+    expected_template = canonical_template(rule_template).value
     mismatches = [
         i for i, entry in enumerate(exam_meta)
-        if entry.get("rule", {}).get("template") != expected_template
+        if normalize_template_value(entry.get("rule", {}).get("template", expected_template), rule_template) != expected_template
     ]
     if mismatches:
         st.session_state.exam_meta = []
@@ -800,10 +826,9 @@ def render_exam() -> None:
         st.subheader("规则说明")
         rule_desc = {
             "递进规则 (Progression)": "属性沿固定步长变化：尺寸/姿态/位置的递进",
-            "循环规则 (Cycle)": "形状离散循环：球体→立方体→圆柱→圆锥→...",
-            "拷贝规则 (Copy)": "尺寸/形状按左右顺序循环拷贝",
+            "循环规则 (Cycle，含原 Copy)": "固定 3 档循环：密度 / 尺寸 / 形状 / 颜色（同一行/列三格各出现一次）",
             "增减规则 (Count)": "叶节点数量变化：2↔3",
-            "守恒规则 (Conservation)": "尺寸守恒：一增一减，总和不变",
+            "守恒规则 (Conservation)": "尺寸守恒：固定3个几何体联动（+1/-1/0）",
             "置换规则 (Permutation)": "位置槽位循环置换",
             "对称规则 (Symmetry)": "对称变换：仅2个几何体；姿态/尺寸均为左+Δ右-Δ",
         }

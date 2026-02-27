@@ -7,7 +7,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .csg import DeltaLevel, SizeLevel
-from .pcrar_entity import PCRAREntity, DENSITY_POINT_PRESETS, density_point_count, entities_equal
+from .pcrar_entity import (
+    PCRAREntity,
+    COLOR_PRESETS,
+    DENSITY_POINT_PRESETS,
+    density_point_count,
+    entities_equal,
+)
 from .pcrar_rules import PCRARRule, RuleParams, RuleTemplate, SYMMETRY_DENSITY_WEIGHT_STEP
 
 
@@ -20,6 +26,7 @@ class MatrixLevelConfig:
     delta_levels: List[DeltaLevel]
     density_indices: List[int]
     slot_levels: List[int]
+    color_levels: List[str]
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -28,6 +35,7 @@ class MatrixLevelConfig:
             "density_levels": [int(DENSITY_POINT_PRESETS[i]) for i in self.density_indices],
             "density_indices": [int(i) for i in self.density_indices],
             "slot_levels": [int(x) for x in self.slot_levels],
+            "color_levels": [str(x) for x in self.color_levels],
         }
 
 
@@ -70,6 +78,7 @@ def build_matrix_level_config(
         delta_levels=delta_levels,
         density_indices=[int(x) for x in density_indices],
         slot_levels=[int(x) for x in sorted(set(slots))],
+        color_levels=[str(x) for x in COLOR_PRESETS],
     )
 
 
@@ -155,10 +164,25 @@ def prepare_entity_for_rule_path(
             _set_symmetry_density_weights_at_boundary(out, params.direction)
     elif params.template == RuleTemplate.CONSERVATION:
         leaves = out.get_leaves()
-        li, ri = params.leaf_idx, params.direction
-        if li is not None and ri is not None and 0 <= li < len(leaves) and 0 <= ri < len(leaves):
-            leaves[li].size_level = level_cfg.size_levels[0]
-            leaves[ri].size_level = level_cfg.size_levels[-1]
+        if params.leaf_indices is not None and params.directions is not None:
+            mid = len(level_cfg.size_levels) // 2
+            center = level_cfg.size_levels[mid]
+            for leaf_idx, step in zip(params.leaf_indices, params.directions):
+                li = int(leaf_idx)
+                d = int(step)
+                if not (0 <= li < len(leaves)):
+                    continue
+                if d > 0:
+                    leaves[li].size_level = level_cfg.size_levels[0]
+                elif d < 0:
+                    leaves[li].size_level = level_cfg.size_levels[-1]
+                else:
+                    leaves[li].size_level = center
+        else:
+            li, ri = params.leaf_idx, params.direction
+            if li is not None and ri is not None and 0 <= li < len(leaves) and 0 <= ri < len(leaves):
+                leaves[li].size_level = level_cfg.size_levels[0]
+                leaves[ri].size_level = level_cfg.size_levels[-1]
     return out
 
 

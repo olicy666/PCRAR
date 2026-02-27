@@ -29,6 +29,14 @@ DEFAULT_MAX_ITERATIONS = 20
 # 上调一档：中档从 7168 提升到 8192，并保持档位间距一致。
 DENSITY_POINT_PRESETS = [11264, 9728, 8192, 6656, 5120]
 
+# 颜色离散档（三档）
+COLOR_PRESETS = ["red", "green", "blue"]
+COLOR_RGB_PRESETS = [
+    (220, 60, 60),   # red
+    (60, 170, 80),   # green
+    (65, 105, 225),  # blue
+]
+
 # 兼容历史接口：密度权重按均分处理
 DENSITY_PRESETS_1 = [[1.0], [1.0], [1.0]]
 DENSITY_PRESETS_2 = [[0.5, 0.5], [0.5, 0.5], [0.5, 0.5]]
@@ -47,6 +55,31 @@ def density_point_count(idx: int) -> int:
     return int(DENSITY_POINT_PRESETS[idx])
 
 
+def color_label(idx: int) -> str:
+    """根据颜色档位返回颜色标签"""
+    if not COLOR_PRESETS:
+        return "red"
+    idx = int(idx)
+    if idx < 0:
+        idx = 0
+    elif idx >= len(COLOR_PRESETS):
+        idx = len(COLOR_PRESETS) - 1
+    return str(COLOR_PRESETS[idx])
+
+
+def color_rgb(idx: int) -> Tuple[int, int, int]:
+    """根据颜色档位返回 RGB 颜色"""
+    if not COLOR_RGB_PRESETS:
+        return (220, 60, 60)
+    idx = int(idx)
+    if idx < 0:
+        idx = 0
+    elif idx >= len(COLOR_RGB_PRESETS):
+        idx = len(COLOR_RGB_PRESETS) - 1
+    rgb = COLOR_RGB_PRESETS[idx]
+    return (int(rgb[0]), int(rgb[1]), int(rgb[2]))
+
+
 @dataclass
 class ObservationConfig:
     """观测配置 (O)"""
@@ -56,6 +89,7 @@ class ObservationConfig:
     n_points: int = DEFAULT_N_POINTS
     part_sampling_weights: Optional[List[float]] = None
     density_preset_idx: int = 0  # 密度档位索引
+    color_preset_idx: int = 0  # 颜色档位索引（red/green/blue）
 
     def copy(self) -> "ObservationConfig":
         return ObservationConfig(
@@ -65,6 +99,7 @@ class ObservationConfig:
             n_points=self.n_points,
             part_sampling_weights=list(self.part_sampling_weights) if self.part_sampling_weights else None,
             density_preset_idx=self.density_preset_idx,
+            color_preset_idx=self.color_preset_idx,
         )
 
     def get_global_rotation_matrix(self) -> np.ndarray:
@@ -82,6 +117,7 @@ class ObservationConfig:
             "n_points": self.n_points,
             "part_sampling_weights": list(self.part_sampling_weights) if self.part_sampling_weights else None,
             "density_preset_idx": self.density_preset_idx,
+            "color_preset_idx": self.color_preset_idx,
         }
 
     @staticmethod
@@ -93,6 +129,7 @@ class ObservationConfig:
             n_points=d.get("n_points", DEFAULT_N_POINTS),
             part_sampling_weights=d.get("part_sampling_weights"),
             density_preset_idx=d.get("density_preset_idx", 0),
+            color_preset_idx=d.get("color_preset_idx", 0),
         )
 
 
@@ -335,11 +372,13 @@ def sample_random_entity(
     # 随机密度档位
     density_preset_idx = int(rng.integers(len(DENSITY_POINT_PRESETS)))
     n_points = density_point_count(density_preset_idx)
-    
+    color_preset_idx = int(rng.integers(len(COLOR_PRESETS)))
+
     obs = ObservationConfig(
         global_pose_deg=global_pose_deg,
         n_points=n_points,
         density_preset_idx=density_preset_idx,
+        color_preset_idx=color_preset_idx,
     )
     
     return PCRAREntity(csg=csg, obs=obs)

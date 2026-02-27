@@ -212,6 +212,8 @@ class PCRARDatasetGenerator:
         for _ in range(max_entity_attempts):
             if self.config.rule_filter == {RuleTemplate.COPY}:
                 leaf_count = 3
+            elif self.config.rule_filter == {RuleTemplate.CONSERVATION}:
+                leaf_count = 3
             elif self.config.rule_filter == {RuleTemplate.SYMMETRY}:
                 leaf_count = 2
             else:
@@ -317,6 +319,8 @@ class PCRARDatasetGenerator:
         max_entity_attempts = 50
         for _ in range(max_entity_attempts):
             if self.config.rule_filter == {RuleTemplate.COPY}:
+                leaf_count = 3
+            elif self.config.rule_filter == {RuleTemplate.CONSERVATION}:
                 leaf_count = 3
             elif self.config.rule_filter == {RuleTemplate.SYMMETRY}:
                 leaf_count = 2
@@ -735,7 +739,15 @@ class PCRARDatasetGenerator:
             else:
                 core = "增减规则：leaf 数量按 1→3→2→1 反向循环。"
         elif rule.template == RuleTemplate.CONSERVATION:
-            core = f"守恒规则：leaf{leaf_idx} 尺寸 +1，leaf{direction} 尺寸 -1（一增一减）。"
+            if leaf_indices:
+                parts = []
+                for i, idx in enumerate(leaf_indices):
+                    d = directions[i] if i < len(directions) else 0
+                    sign = f"{d:+d}"
+                    parts.append(f"leaf{idx}({sign})")
+                core = f"守恒规则：三叶联动尺寸变化（{', '.join(parts)}），总量离散守恒。"
+            else:
+                core = f"守恒规则：leaf{leaf_idx} 尺寸 +1，leaf{direction} 尺寸 -1（一增一减）。"
         elif rule.template == RuleTemplate.PERMUTATION:
             core = f"置换规则：所有 leaf 的 slot 位置循环{shift_word}。"
         elif rule.template == RuleTemplate.SYMMETRY:

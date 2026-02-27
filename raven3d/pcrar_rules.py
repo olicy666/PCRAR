@@ -18,7 +18,12 @@ from .csg import (
     enforce_leaf_separation, has_containment_risk, has_excessive_overlap,
 )
 from .pcrar_entity import (
-    PCRAREntity, ObservationConfig, sample_random_entity,
+    COLOR_PRESETS,
+    DENSITY_POINT_PRESETS,
+    PCRAREntity,
+    ObservationConfig,
+    density_point_count,
+    sample_random_entity,
 )
 
 
@@ -30,6 +35,32 @@ DELTA_LEVELS = list(DeltaLevel)
 SLOTS = [-1, 0, 1]
 # 对称规则密度步长（左右采样权重一增一减）
 SYMMETRY_DENSITY_WEIGHT_STEP = 0.1
+
+# 合并后的 Cycle 规则（Cycle + Copy）固定轴：密度/尺寸/形状/颜色，均为 3 档循环
+CYCLE_AXIS_DENSITY = "cycle_density_distribute3"
+CYCLE_AXIS_SIZE = "cycle_size_distribute3"
+CYCLE_AXIS_SHAPE = "cycle_shape_distribute3"
+CYCLE_AXIS_COLOR = "cycle_color_distribute3"
+CYCLE_AXES = [
+    CYCLE_AXIS_DENSITY,
+    CYCLE_AXIS_SIZE,
+    CYCLE_AXIS_SHAPE,
+    CYCLE_AXIS_COLOR,
+]
+CYCLE_SIZE_LEVELS: List[SizeLevel] = [SizeLevel.S, SizeLevel.M, SizeLevel.L]
+CYCLE_SHAPE_LEVELS: List[PrimType] = [PrimType.SPHERE, PrimType.BOX, PrimType.CYLINDER]
+CYCLE_COLOR_INDICES: List[int] = [0, 1, 2]
+
+
+def _pick_density_triplet() -> List[int]:
+    candidates = list(range(len(DENSITY_POINT_PRESETS)))
+    if len(candidates) <= 3:
+        return [int(x) for x in candidates]
+    idx = np.linspace(0, len(candidates) - 1, 3)
+    return sorted({int(round(x)) for x in idx})
+
+
+CYCLE_DENSITY_INDICES: List[int] = _pick_density_triplet()
 
 
 class RuleTemplate(str, Enum):
@@ -122,6 +153,25 @@ def _get_density_weights(entity: PCRAREntity, n_leaves: int) -> np.ndarray:
         if arr.sum() > 0:
             return arr / arr.sum()
     return np.ones(n_leaves, dtype=float) / float(n_leaves)
+
+
+def _normalize_cycle_axis(axis: Optional[str]) -> Optional[str]:
+    """兼容旧轴命名并归一到新的 Cycle distribute-three 轴。"""
+    mapping = {
+        None: None,
+        "shape": CYCLE_AXIS_SHAPE,
+        "density": CYCLE_AXIS_DENSITY,
+        "size": CYCLE_AXIS_SIZE,
+        "color": CYCLE_AXIS_COLOR,
+        "copy_shape_cycle": CYCLE_AXIS_SHAPE,
+        "copy_size_cycle": CYCLE_AXIS_SIZE,
+        "copy_density_cycle": CYCLE_AXIS_DENSITY,
+    }
+    if axis in mapping:
+        return mapping[axis]
+    if axis in CYCLE_AXES:
+        return axis
+    return None
 
 
 class ProgressionRule(PCRARRule):
@@ -223,66 +273,101 @@ class ProgressionRule(PCRARRule):
 
 
 class CycleRule(PCRARRule):
-    """Rule2 Cycle（循环）
-    
-    某个 leaf 的 prim_type 做离散循环 Sphere→Box→Cylinder→Cone→Sphere
+    """Rule2 Cycle（循环，合并 Copy）
+
+    在 2-3 个几何体场景中，对单一属性执行 3 档循环：
+    - density: 3 档点数密度循环
+    - size: 3 档尺寸循环（所有 leaf 同步）
+    - shape: 3 档形状循环（所有 leaf 同步）
+    - color: 3 档颜色循环（red/green/blue）
     """
     template = RuleTemplate.CYCLE
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.CYCLE]
-    
+
+    @staticmethod
+    def _cycle_next_idx(cur_idx: int, direction: int, cycle_len: int) -> int:
+        step = 1 if int(direction) >= 0 else -1
+        return int((int(cur_idx) + step) % int(cycle_len))
+
+    @staticmethod
+    def _closest_density_cycle_idx(raw_idx: int) -> int:
+        if not CYCLE_DENSITY_INDICES:
+            return 0
+        if raw_idx in CYCLE_DENSITY_INDICES:
+            return int(CYCLE_DENSITY_INDICES.index(raw_idx))
+        distances = [abs(int(raw_idx) - int(x)) for x in CYCLE_DENSITY_INDICES]
+        return int(np.argmin(distances))
+
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
-        leaves = entity.get_leaves()
-        leaf_count = len(leaves)
-        # 限制参与循环的对象数：不取 1，只在 2/3 中选择（受 leaf_count 上限约束）
-        if leaf_count >= 3:
-            k = int(_choice_from_list(rng, [2, 3]))
-        elif leaf_count == 2:
-            k = 2
-        else:
-            k = 1
-        leaf_indices = [int(i) for i in rng.choice(leaf_count, size=k, replace=False)]
-        directions = [int(_choice_from_list(rng, [-1, 1])) for _ in range(k)]
-        
+        if entity.leaf_count() < 2:
+            return RuleParams(template=self.template, axis=CYCLE_AXIS_SHAPE, direction=1)
+        axis = str(_choice_from_list(rng, CYCLE_AXES))
+        direction = int(_choice_from_list(rng, [-1, 1]))
         return RuleParams(
             template=self.template,
-            axis="shape",
-            leaf_idx=leaf_indices[0] if leaf_indices else None,
-            leaf_indices=leaf_indices,
-            direction=directions[0] if directions else 1,
-            directions=directions,
+            axis=axis,
+            direction=direction,
         )
-    
+
+    def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
+        if entity.leaf_count() not in (2, 3):
+            return False
+        axis = _normalize_cycle_axis(params.axis)
+        if axis is None:
+            return False
+        if axis == CYCLE_AXIS_SHAPE:
+            return len(entity.get_leaves()) > 0
+        if axis == CYCLE_AXIS_SIZE:
+            return len(CYCLE_SIZE_LEVELS) == 3
+        if axis == CYCLE_AXIS_DENSITY:
+            return len(CYCLE_DENSITY_INDICES) == 3
+        if axis == CYCLE_AXIS_COLOR:
+            return len(CYCLE_COLOR_INDICES) == 3 and len(COLOR_PRESETS) >= 3
+        return False
+
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:
         new_entity = entity.copy()
         leaves = new_entity.get_leaves()
-        if params.leaf_indices:
-            for i, leaf_idx in enumerate(params.leaf_indices):
-                if leaf_idx < 0 or leaf_idx >= len(leaves):
-                    continue
-                leaf = leaves[leaf_idx]
-                direction = params.direction
-                if params.directions and i < len(params.directions):
-                    direction = params.directions[i]
-                
-                # 形状循环
-                idx = PRIM_TYPE_CYCLE.index(leaf.prim_type)
-                new_idx = (idx + direction) % len(PRIM_TYPE_CYCLE)
-                leaf.prim_type = PRIM_TYPE_CYCLE[new_idx]
-        elif params.leaf_idx is not None:
-            leaf = leaves[params.leaf_idx]
-            
-            # 形状循环
-            idx = PRIM_TYPE_CYCLE.index(leaf.prim_type)
-            new_idx = (idx + params.direction) % len(PRIM_TYPE_CYCLE)
-            leaf.prim_type = PRIM_TYPE_CYCLE[new_idx]
-        
+        axis = _normalize_cycle_axis(params.axis)
+        if axis is None or not leaves:
+            return new_entity
+
+        direction = int(params.direction)
+        if axis == CYCLE_AXIS_SHAPE:
+            cur_shape = leaves[0].prim_type
+            if cur_shape in CYCLE_SHAPE_LEVELS:
+                cur_idx = int(CYCLE_SHAPE_LEVELS.index(cur_shape))
+            else:
+                cur_idx = 0
+            nxt = self._cycle_next_idx(cur_idx, direction, len(CYCLE_SHAPE_LEVELS))
+            target_shape = CYCLE_SHAPE_LEVELS[nxt]
+            for leaf in leaves:
+                leaf.prim_type = target_shape
+        elif axis == CYCLE_AXIS_SIZE:
+            cur_size = leaves[0].size_level
+            if cur_size in CYCLE_SIZE_LEVELS:
+                cur_idx = int(CYCLE_SIZE_LEVELS.index(cur_size))
+            else:
+                cur_idx = 0
+            nxt = self._cycle_next_idx(cur_idx, direction, len(CYCLE_SIZE_LEVELS))
+            target_size = CYCLE_SIZE_LEVELS[nxt]
+            for leaf in leaves:
+                leaf.size_level = target_size
+        elif axis == CYCLE_AXIS_DENSITY:
+            cur = int(new_entity.obs.density_preset_idx)
+            cur_cycle_idx = self._closest_density_cycle_idx(cur)
+            nxt = self._cycle_next_idx(cur_cycle_idx, direction, len(CYCLE_DENSITY_INDICES))
+            target_density_idx = int(CYCLE_DENSITY_INDICES[nxt])
+            new_entity.obs.density_preset_idx = target_density_idx
+            new_entity.obs.n_points = density_point_count(target_density_idx)
+        elif axis == CYCLE_AXIS_COLOR:
+            cur = int(new_entity.obs.color_preset_idx)
+            cur_idx = int(cur) if int(cur) in CYCLE_COLOR_INDICES else 0
+            nxt = self._cycle_next_idx(cur_idx, direction, len(CYCLE_COLOR_INDICES))
+            new_entity.obs.color_preset_idx = int(CYCLE_COLOR_INDICES[nxt])
+
         return new_entity
-    
-    def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
-        if entity.leaf_count() == 1:
-            return False
-        return True
-    
+
     def check(self, entity_a: PCRAREntity, entity_b: PCRAREntity, params: RuleParams) -> bool:
         expected = self.apply(entity_a, params)
         return _compare_entities(expected, entity_b)
@@ -482,50 +567,85 @@ class CountRule(PCRARRule):
 class ConservationRule(PCRARRule):
     """Rule5 Conservation（守恒）
     
-    任选两 leaf：size(i)+size(j)=C（离散守恒，一增一减）
+    固定 3 个 leaf 联动：一个 +1、一个 -1、一个 0（离散守恒）
     """
     template = RuleTemplate.CONSERVATION
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.CONSERVATION]
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
         leaves = entity.get_leaves()
-        if len(leaves) < 2:
+        if len(leaves) != 3:
             return RuleParams(template=self.template)
-        
-        # 选择两个叶节点
-        indices = rng.choice(len(leaves), size=2, replace=False)
-        
+
+        indices = [0, 1, 2]
+        rng.shuffle(indices)
+        plus_idx, minus_idx, hold_idx = indices
+
         return RuleParams(
             template=self.template,
             axis="size_conservation",
-            leaf_idx=int(indices[0]),  # 第一个 leaf 索引
-            direction=int(indices[1]),  # 第二个 leaf 索引（复用 direction 字段）
+            leaf_idx=int(plus_idx),      # 兼容：+1 leaf
+            direction=int(minus_idx),    # 兼容：-1 leaf（复用 direction 字段）
+            leaf_indices=[int(plus_idx), int(minus_idx), int(hold_idx)],
+            directions=[1, -1, 0],
         )
+
+    @staticmethod
+    def _resolve_triplet_params(
+        leaves: List[Leaf],
+        params: RuleParams,
+    ) -> Optional[List[Tuple[int, int]]]:
+        n = len(leaves)
+        if n != 3:
+            return None
+
+        if params.leaf_indices is not None and params.directions is not None:
+            if len(params.leaf_indices) != 3 or len(params.directions) != 3:
+                return None
+            indices = [int(i) for i in params.leaf_indices]
+            directions = [int(d) for d in params.directions]
+            if len(set(indices)) != 3:
+                return None
+            if any(i < 0 or i >= n for i in indices):
+                return None
+            if sorted(indices) != list(range(n)):
+                return None
+            if sorted(directions) != [-1, 0, 1]:
+                return None
+            return list(zip(indices, directions))
+
+        plus_idx = params.leaf_idx
+        minus_idx = params.direction
+        if plus_idx is None or minus_idx is None:
+            return None
+        plus_idx = int(plus_idx)
+        minus_idx = int(minus_idx)
+        if plus_idx == minus_idx:
+            return None
+        if plus_idx < 0 or plus_idx >= n or minus_idx < 0 or minus_idx >= n:
+            return None
+        hold = [i for i in range(n) if i not in {plus_idx, minus_idx}]
+        if len(hold) != 1:
+            return None
+        return [(plus_idx, 1), (minus_idx, -1), (int(hold[0]), 0)]
     
     def can_apply(self, entity: PCRAREntity, params: RuleParams) -> bool:
         leaves = entity.get_leaves()
-        if len(leaves) < 2:
+        if len(leaves) != 3:
             return False
         # 过滤已经发生明显遮蔽/包裹的状态，避免题面出现“像只有一个几何体”的情况
         if has_containment_risk(leaves) or has_excessive_overlap(leaves):
             return False
-        
-        idx1 = params.leaf_idx
-        idx2 = params.direction  # 复用 direction 存储第二个索引
-        
-        if idx1 >= len(leaves) or idx2 >= len(leaves):
+
+        leaf_steps = self._resolve_triplet_params(leaves, params)
+        if leaf_steps is None:
             return False
-        
-        # 检查是否可以一增一减
-        leaf1 = leaves[idx1]
-        leaf2 = leaves[idx2]
-        
-        idx1_size = SIZE_LEVELS.index(leaf1.size_level)
-        idx2_size = SIZE_LEVELS.index(leaf2.size_level)
-        
-        # leaf1 增加需要 idx1_size < max，leaf2 减少需要 idx2_size > 0
-        if not (idx1_size < len(SIZE_LEVELS) - 1 and idx2_size > 0):
-            return False
+
+        for leaf_idx, step in leaf_steps:
+            size_idx = SIZE_LEVELS.index(leaves[leaf_idx].size_level)
+            new_idx = size_idx + int(step)
+            if not (0 <= new_idx < len(SIZE_LEVELS)):
+                return False
 
         # 检查应用一步守恒变换后是否会导致包含/过度重叠
         candidate = self.apply(entity, params)
@@ -537,26 +657,17 @@ class ConservationRule(PCRARRule):
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:
         new_entity = entity.copy()
         leaves = new_entity.get_leaves()
-        
-        idx1 = params.leaf_idx
-        idx2 = params.direction
-        
-        if idx1 >= len(leaves) or idx2 >= len(leaves):
+
+        leaf_steps = self._resolve_triplet_params(leaves, params)
+        if leaf_steps is None:
             return new_entity
-        
-        leaf1 = leaves[idx1]
-        leaf2 = leaves[idx2]
-        
-        # 守恒变换：一增一减
-        idx1_size = SIZE_LEVELS.index(leaf1.size_level)
-        idx2_size = SIZE_LEVELS.index(leaf2.size_level)
-        
-        new_idx1 = min(len(SIZE_LEVELS) - 1, idx1_size + 1)
-        new_idx2 = max(0, idx2_size - 1)
-        
-        leaf1.size_level = SIZE_LEVELS[new_idx1]
-        leaf2.size_level = SIZE_LEVELS[new_idx2]
-        
+
+        for leaf_idx, step in leaf_steps:
+            leaf = leaves[leaf_idx]
+            size_idx = SIZE_LEVELS.index(leaf.size_level)
+            new_idx = max(0, min(len(SIZE_LEVELS) - 1, size_idx + int(step)))
+            leaf.size_level = SIZE_LEVELS[new_idx]
+
         return new_entity
     
     def check(self, entity_a: PCRAREntity, entity_b: PCRAREntity, params: RuleParams) -> bool:
@@ -812,6 +923,8 @@ def generate_distractor(
     if method == "different_axis" and params.axis:
         # 使用不同的属性轴
         axes = ["r", "R", "p"]
+        if params.template == RuleTemplate.CYCLE:
+            axes = list(CYCLE_AXES)
         if params.template == RuleTemplate.SYMMETRY:
             axes = ["R", "r"]
         other_axes = [a for a in axes if a != params.axis]

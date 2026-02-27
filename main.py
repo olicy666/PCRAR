@@ -51,8 +51,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-options", type=int, default=4, help="PCRAR matrix option count")
     parser.add_argument("--k-h-choices", type=str, default="1,2", help="PCRAR matrix horizontal step choices")
     parser.add_argument("--k-v-choices", type=str, default="1,2", help="PCRAR matrix vertical step choices")
-    parser.add_argument("--matrix-size-levels", type=int, default=7, help="PCRAR matrix size level count")
-    parser.add_argument("--matrix-density-levels", type=int, default=5, help="PCRAR matrix density level count")
+    parser.add_argument("--matrix-size-levels", type=int, default=3, help="PCRAR matrix size level count")
+    parser.add_argument("--matrix-density-levels", type=int, default=3, help="PCRAR matrix density level count")
     parser.add_argument("--matrix-delta-levels", type=int, default=5, help="PCRAR matrix delta level count")
     parser.add_argument("--matrix-slot-levels", type=str, default="-1,0,1", help="PCRAR matrix slot levels")
     parser.add_argument(

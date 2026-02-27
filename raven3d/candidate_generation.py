@@ -14,8 +14,19 @@ from .matrix_grid import (
     check_consistent_with_alt_relation,
     check_consistent_with_true_relation,
 )
-from .pcrar_entity import PCRAREntity, entities_equal, sample_random_entity
-from .pcrar_rules import PCRARRule, RuleParams, RuleTemplate, get_rule
+from .pcrar_entity import PCRAREntity, density_point_count, entities_equal, sample_random_entity
+from .pcrar_rules import (
+    CYCLE_AXIS_COLOR,
+    CYCLE_AXIS_DENSITY,
+    CYCLE_AXIS_SHAPE,
+    CYCLE_AXIS_SIZE,
+    CYCLE_DENSITY_INDICES,
+    CYCLE_SIZE_LEVELS,
+    PCRARRule,
+    RuleParams,
+    RuleTemplate,
+    get_rule,
+)
 
 
 @dataclass
@@ -126,6 +137,50 @@ def _make_irrelevant(
     if leaves:
         leaves[0].prim_type = PRIM_TYPE_CYCLE[(PRIM_TYPE_CYCLE.index(leaves[0].prim_type) + 2) % len(PRIM_TYPE_CYCLE)]
     return entity
+
+
+def _perturb_cycle_distribute_three(
+    gt: PCRAREntity,
+    params: RuleParams,
+    level_cfg: MatrixLevelConfig,
+    rng: np.random.Generator,
+    strong: bool,
+) -> PCRAREntity:
+    out = gt.copy()
+    leaves = out.get_leaves()
+    axis = params.axis
+    if axis == CYCLE_AXIS_SHAPE:
+        steps = (2,) if strong else (-1, 1)
+        max_changes = len(leaves) if strong else 1
+        return _perturb_cycle_shape_only(out, rng, step_choices=steps, max_changes=max_changes)
+
+    if axis == CYCLE_AXIS_SIZE and leaves:
+        choices = [x for x in CYCLE_SIZE_LEVELS if x != leaves[0].size_level]
+        if choices:
+            target = choices[int(rng.integers(len(choices)))]
+            for leaf in leaves:
+                leaf.size_level = target
+        return out
+
+    if axis == CYCLE_AXIS_DENSITY:
+        choices = [int(x) for x in CYCLE_DENSITY_INDICES if int(x) != int(out.obs.density_preset_idx)]
+        if choices:
+            target = int(choices[int(rng.integers(len(choices)))])
+            out.obs.density_preset_idx = target
+            out.obs.n_points = density_point_count(target)
+        return out
+
+    if axis == CYCLE_AXIS_COLOR:
+        cur = int(out.obs.color_preset_idx)
+        choices = [x for x in (0, 1, 2) if x != cur]
+        if choices:
+            if strong and len(choices) > 1:
+                out.obs.color_preset_idx = int(choices[-1])
+            else:
+                out.obs.color_preset_idx = int(choices[int(rng.integers(len(choices)))])
+        return out
+
+    return _perturb_from_gt(gt, level_cfg, rng)
 
 
 def _sample_count_only_candidate(
@@ -357,11 +412,12 @@ def generate_candidates(
             if cand is None:
                 continue
         elif true_rule.template == RuleTemplate.CYCLE:
-            cand = _perturb_cycle_shape_only(
+            cand = _perturb_cycle_distribute_three(
                 gt_entity,
+                true_params,
+                level_cfg,
                 rng,
-                step_choices=(-1, 1),
-                max_changes=1,
+                strong=False,
             )
         else:
             cand = _perturb_from_gt(gt_entity, level_cfg, rng)
@@ -390,7 +446,15 @@ def generate_candidates(
         if true_rule.template == RuleTemplate.COUNT:
             distractor_notes.append("数量干扰项：仅改变几何体数量，不满足真实/替代关系")
         elif true_rule.template == RuleTemplate.CYCLE:
-            distractor_notes.append("形状干扰项：仅改变 primitive_type，不满足真实/替代关系")
+            axis = true_params.axis
+            if axis == CYCLE_AXIS_DENSITY:
+                distractor_notes.append("密度干扰项：仅改变密度档位，不满足真实/替代关系")
+            elif axis == CYCLE_AXIS_SIZE:
+                distractor_notes.append("尺寸干扰项：仅改变尺寸档位，不满足真实/替代关系")
+            elif axis == CYCLE_AXIS_COLOR:
+                distractor_notes.append("颜色干扰项：仅改变颜色档位，不满足真实/替代关系")
+            else:
+                distractor_notes.append("形状干扰项：仅改变 primitive_type，不满足真实/替代关系")
         else:
             distractor_notes.append("外观上接近目标格，但不满足真实/替代关系")
         perceptual_added += 1
@@ -408,11 +472,12 @@ def generate_candidates(
             if cand is None:
                 continue
         elif true_rule.template == RuleTemplate.CYCLE:
-            cand = _perturb_cycle_shape_only(
+            cand = _perturb_cycle_distribute_three(
                 gt_entity,
+                true_params,
+                level_cfg,
                 rng,
-                step_choices=(2,),
-                max_changes=gt_entity.leaf_count(),
+                strong=True,
             )
         else:
             cand = _make_irrelevant(grid_context[0][0] or gt_entity, rng)
@@ -441,7 +506,15 @@ def generate_candidates(
         if true_rule.template == RuleTemplate.COUNT:
             distractor_notes.append("数量干扰项：仅改变几何体数量")
         elif true_rule.template == RuleTemplate.CYCLE:
-            distractor_notes.append("形状干扰项：仅改变 primitive_type")
+            axis = true_params.axis
+            if axis == CYCLE_AXIS_DENSITY:
+                distractor_notes.append("密度干扰项：仅改变密度档位")
+            elif axis == CYCLE_AXIS_SIZE:
+                distractor_notes.append("尺寸干扰项：仅改变尺寸档位")
+            elif axis == CYCLE_AXIS_COLOR:
+                distractor_notes.append("颜色干扰项：仅改变颜色档位")
+            else:
+                distractor_notes.append("形状干扰项：仅改变 primitive_type")
         else:
             distractor_notes.append("与目标域风格或关系明显不一致")
 

@@ -23,8 +23,16 @@ from .matrix_grid import (
     normalize_entity_levels,
     prepare_entity_for_rule_path,
 )
-from .pcrar_entity import DEFAULT_N_POINTS, PCRAREntity, sample_random_entity
+from .pcrar_entity import DEFAULT_N_POINTS, PCRAREntity, color_rgb, density_point_count, sample_random_entity
 from .pcrar_rules import (
+    CYCLE_AXES,
+    CYCLE_AXIS_COLOR,
+    CYCLE_AXIS_DENSITY,
+    CYCLE_AXIS_SHAPE,
+    CYCLE_AXIS_SIZE,
+    CYCLE_DENSITY_INDICES,
+    CYCLE_SHAPE_LEVELS,
+    CYCLE_SIZE_LEVELS,
     PCRARRule,
     RuleParams,
     RuleTemplate,
@@ -69,8 +77,8 @@ class PCRARConfig:
     num_options: int = 4
     matrix_k_h_choices: Tuple[int, ...] = (1, 2)
     matrix_k_v_choices: Tuple[int, ...] = (1, 2)
-    matrix_size_levels: int = 7
-    matrix_density_levels: int = 5
+    matrix_size_levels: int = 3
+    matrix_density_levels: int = 3
     matrix_delta_levels: int = 5
     matrix_slot_levels: Tuple[int, ...] = (-1, 0, 1)
     matrix_missing_one_per_row: bool = True
@@ -137,59 +145,103 @@ class PCRARDatasetGenerator:
         entity: PCRAREntity,
         preferred_axis: Optional[str] = None,
     ) -> Tuple[PCRARRule, RuleParams]:
-        templates = list(self.config.rule_filter) if self.config.rule_filter else list(RuleTemplate)
+        templates = self._effective_rule_templates()
         self.rng.shuffle(templates)
         for template in templates:
             rule = get_rule(template)
-            if template == RuleTemplate.COPY:
-                self._enforce_copy_preconditions(entity, preferred_axis=preferred_axis)
+            if template == RuleTemplate.CYCLE:
+                self._enforce_cycle_preconditions(entity, preferred_axis=preferred_axis)
+            elif template == RuleTemplate.SYMMETRY:
+                self._enforce_symmetry_preconditions(entity, preferred_axis=preferred_axis)
             for _ in range(40):
                 params = rule.sample_params(self.rng, entity)
-                if template == RuleTemplate.COPY and preferred_axis and params.axis != preferred_axis:
-                    continue
+                if preferred_axis:
+                    if template == RuleTemplate.CYCLE:
+                        expected_cycle_axis = self._normalize_cycle_axis_name(preferred_axis)
+                        if expected_cycle_axis is not None and params.axis != expected_cycle_axis:
+                            continue
+                    elif template in {RuleTemplate.PROGRESSION, RuleTemplate.SYMMETRY} and params.axis != preferred_axis:
+                        continue
                 if rule.can_apply(entity, params):
                     return rule, params
         raise RuntimeError("No applicable matrix rule found for current entity")
 
-    def _enforce_copy_preconditions(self, entity: PCRAREntity, preferred_axis: Optional[str] = None) -> None:
-        leaves = entity.get_leaves()
-        if len(leaves) != 3:
-            return
-        mode_map = {
-            "copy_shape_cycle": 0,
-            "copy_size_cycle": 1,
+    def _effective_rule_templates(self) -> List[RuleTemplate]:
+        if self.config.rule_filter:
+            normalized = {self._normalize_template_name(t) for t in self.config.rule_filter}
+            return list(normalized)
+        # 合并 Cycle + Copy 后，矩阵主路径默认不再单独采样 Copy。
+        return [t for t in RuleTemplate if t != RuleTemplate.COPY]
+
+    @staticmethod
+    def _normalize_template_name(template: RuleTemplate) -> RuleTemplate:
+        return RuleTemplate.CYCLE if template == RuleTemplate.COPY else template
+
+    @staticmethod
+    def _normalize_cycle_axis_name(axis: Optional[str]) -> Optional[str]:
+        if axis is None:
+            return None
+        mapping = {
+            "shape": CYCLE_AXIS_SHAPE,
+            "density": CYCLE_AXIS_DENSITY,
+            "size": CYCLE_AXIS_SIZE,
+            "color": CYCLE_AXIS_COLOR,
+            "copy_shape_cycle": CYCLE_AXIS_SHAPE,
+            "copy_size_cycle": CYCLE_AXIS_SIZE,
+            "copy_density_cycle": CYCLE_AXIS_DENSITY,
         }
-        mode = mode_map.get(preferred_axis, int(self.rng.integers(2)))
-        if mode == 0:
-            # copy_shape_cycle: 3 distinct shapes
-            for i, leaf in enumerate(leaves):
-                leaf.prim_type = PRIM_TYPE_CYCLE[i % len(PRIM_TYPE_CYCLE)]
-        elif mode == 1:
-            # copy_size_cycle: same shape, all sizes different
-            base = leaves[0].prim_type
+        if axis in mapping:
+            return mapping[axis]
+        if axis in CYCLE_AXES:
+            return axis
+        return None
+
+    def _enforce_cycle_preconditions(self, entity: PCRAREntity, preferred_axis: Optional[str] = None) -> None:
+        leaves = entity.get_leaves()
+        if len(leaves) not in (2, 3):
+            return
+        axis = self._normalize_cycle_axis_name(preferred_axis)
+        if axis is None:
+            axis = str(self.rng.choice(np.array(CYCLE_AXES, dtype=object)))
+
+        if axis == CYCLE_AXIS_SHAPE:
+            shape_idx = int(self.rng.integers(len(CYCLE_SHAPE_LEVELS)))
+            shape = CYCLE_SHAPE_LEVELS[shape_idx]
             for leaf in leaves:
-                leaf.prim_type = base
-            size_levels = self.level_cfg.size_levels
-            if len(size_levels) >= 3:
-                # 使用中间三档而非极端档位，降低包含/重叠概率，提升 size 题通过率
-                mid = len(size_levels) // 2
-                lo = max(0, mid - 1)
-                hi = min(len(size_levels) - 1, lo + 2)
-                lo = max(0, hi - 2)
-                chosen = [size_levels[lo], size_levels[lo + 1], size_levels[hi]]
-                for i, leaf in enumerate(leaves):
-                    leaf.size_level = chosen[i]
-            # 明确左中右槽位并重新分离，避免尺寸差导致遮蔽
-            slots = list(self.level_cfg.slot_levels) if self.level_cfg.slot_levels else [-1, 0, 1]
-            slots = sorted(slots)
-            if len(slots) >= 3:
-                for i, leaf in enumerate(leaves):
-                    leaf.slot = int(slots[i])
-            enforce_leaf_separation(leaves)
-        else:
-            # Defensive fallback: only shape/size copy axes are supported.
+                leaf.prim_type = shape
+        elif axis == CYCLE_AXIS_SIZE:
+            size_idx = int(self.rng.integers(len(CYCLE_SIZE_LEVELS)))
+            size = CYCLE_SIZE_LEVELS[size_idx]
+            for leaf in leaves:
+                leaf.size_level = size
+        elif axis == CYCLE_AXIS_DENSITY:
+            density_idx = int(self.rng.choice(np.array(CYCLE_DENSITY_INDICES, dtype=int)))
+            entity.obs.density_preset_idx = density_idx
+            entity.obs.n_points = density_point_count(density_idx)
+        elif axis == CYCLE_AXIS_COLOR:
+            entity.obs.color_preset_idx = int(self.rng.integers(3))
+
+        enforce_leaf_separation(leaves)
+
+    def _enforce_copy_preconditions(self, entity: PCRAREntity, preferred_axis: Optional[str] = None) -> None:
+        """兼容接口：Copy 轴映射为合并后的 Cycle 轴。"""
+        self._enforce_cycle_preconditions(entity, preferred_axis=preferred_axis)
+
+    def _enforce_symmetry_preconditions(self, entity: PCRAREntity, preferred_axis: Optional[str] = None) -> None:
+        leaves = entity.get_leaves()
+        if len(leaves) != 2:
+            return
+        if preferred_axis == "R":
+            # Symmetry pose axis rejects spheres; force non-spherical primitives.
+            non_sphere = [PRIM_TYPE_CYCLE[1], PRIM_TYPE_CYCLE[2]]
             for i, leaf in enumerate(leaves):
-                leaf.prim_type = PRIM_TYPE_CYCLE[i % len(PRIM_TYPE_CYCLE)]
+                leaf.prim_type = non_sphere[i % len(non_sphere)]
+        elif preferred_axis == "r":
+            # Keep both leaves away from size boundaries to preserve +/- room.
+            mid = len(self.level_cfg.size_levels) // 2
+            center = self.level_cfg.size_levels[mid]
+            for leaf in leaves:
+                leaf.size_level = center
 
     @staticmethod
     def _min_unique_threshold(rule: PCRARRule) -> int:
@@ -208,6 +260,45 @@ class PCRARDatasetGenerator:
             for entity in row:
                 if not cls._entity_visibility_ok(entity):
                     return False
+        return True
+
+    @staticmethod
+    def _cycle_cell_value(entity: PCRAREntity, axis: str) -> Optional[Any]:
+        leaves = entity.get_leaves()
+        if axis == CYCLE_AXIS_DENSITY:
+            return int(entity.obs.density_preset_idx)
+        if axis == CYCLE_AXIS_SIZE:
+            if not leaves:
+                return None
+            return str(leaves[0].size_level.value)
+        if axis == CYCLE_AXIS_SHAPE:
+            if not leaves:
+                return None
+            return str(leaves[0].prim_type.value)
+        if axis == CYCLE_AXIS_COLOR:
+            return int(entity.obs.color_preset_idx)
+        return None
+
+    @classmethod
+    def _cycle_distribute_three_ok(cls, grid: List[List[PCRAREntity]], params: RuleParams) -> bool:
+        axis = params.axis
+        if axis not in CYCLE_AXES:
+            return True
+        values: List[List[Any]] = []
+        for r in range(3):
+            row_values: List[Any] = []
+            for c in range(3):
+                v = cls._cycle_cell_value(grid[r][c], axis)
+                if v is None:
+                    return False
+                row_values.append(v)
+            values.append(row_values)
+        for r in range(3):
+            if len(set(values[r])) != 3:
+                return False
+        for c in range(3):
+            if len({values[r][c] for r in range(3)}) != 3:
+                return False
         return True
 
     def _sample_missing_positions(self) -> List[Tuple[int, int]]:
@@ -259,6 +350,8 @@ class PCRARDatasetGenerator:
         if params.template == RuleTemplate.PROGRESSION and params.axis == "d":
             return True
         if params.template == RuleTemplate.SYMMETRY and params.axis == "d":
+            return True
+        if params.template == RuleTemplate.CYCLE and params.axis == CYCLE_AXIS_DENSITY:
             return True
         if params.template == RuleTemplate.COPY and params.axis == "copy_density_cycle":
             return True
@@ -392,14 +485,19 @@ class PCRARDatasetGenerator:
         max_attempts: int = 200,
     ) -> Tuple[List[List[PCRAREntity]], int, PCRARRule, RuleParams, PCRARRule, RuleParams]:
         k_max = 2 * k_h + 2 * k_v
+        normalized_filter = (
+            {self._normalize_template_name(t) for t in self.config.rule_filter}
+            if self.config.rule_filter
+            else None
+        )
         for _ in range(max_attempts):
-            if self.config.rule_filter == {RuleTemplate.COPY}:
+            if normalized_filter == {RuleTemplate.CYCLE}:
+                leaf_count = int(self.rng.integers(2, 4))
+            elif normalized_filter == {RuleTemplate.PERMUTATION}:
                 leaf_count = 3
-            elif self.config.rule_filter == {RuleTemplate.CYCLE}:
+            elif normalized_filter == {RuleTemplate.CONSERVATION}:
                 leaf_count = 3
-            elif self.config.rule_filter == {RuleTemplate.PERMUTATION}:
-                leaf_count = 3
-            elif self.config.rule_filter == {RuleTemplate.SYMMETRY}:
+            elif normalized_filter == {RuleTemplate.SYMMETRY}:
                 leaf_count = 2
             else:
                 leaf_count = int(self.rng.integers(self.config.leaf_count_min, self.config.leaf_count_max + 1))
@@ -450,6 +548,8 @@ class PCRARDatasetGenerator:
 
             if not self._grid_visibility_ok(grid):
                 continue
+            if rule.template == RuleTemplate.CYCLE and not self._cycle_distribute_three_ok(grid, params):
+                continue
 
             ok, reason = grid_quality_checks(
                 grid,
@@ -488,6 +588,17 @@ class PCRARDatasetGenerator:
         return context
 
     @staticmethod
+    def _conservation_leaf_steps(params: RuleParams) -> List[Tuple[int, int]]:
+        if params.leaf_indices is not None and params.directions is not None:
+            leaf_steps: List[Tuple[int, int]] = []
+            for leaf_idx, step in zip(params.leaf_indices, params.directions):
+                leaf_steps.append((int(leaf_idx), int(step)))
+            return leaf_steps
+        if params.leaf_idx is not None and params.direction is not None:
+            return [(int(params.leaf_idx), 1), (int(params.direction), -1)]
+        return []
+
+    @staticmethod
     def _summarize_rule_semantics(params: RuleParams) -> Dict[str, Any]:
         template = params.template
         axis = params.axis
@@ -506,9 +617,15 @@ class PCRARDatasetGenerator:
             else:
                 summary["description"] = f"Progression on {summary['changed_attribute']} (step={params.direction})"
         elif template == RuleTemplate.CYCLE:
-            summary["changed_attribute"] = "primitive_type"
+            cycle_attr_map = {
+                CYCLE_AXIS_DENSITY: "density_level",
+                CYCLE_AXIS_SIZE: "size_level",
+                CYCLE_AXIS_SHAPE: "primitive_type",
+                CYCLE_AXIS_COLOR: "color",
+            }
+            summary["changed_attribute"] = cycle_attr_map.get(axis, "cycle_distribute3_axis")
             summary["description"] = (
-                f"Cycle over primitive types on leaves={params.leaf_indices if params.leaf_indices is not None else [params.leaf_idx]}"
+                f"Cycle distribute-three on {summary['changed_attribute']} (direction={int(params.direction)})"
             )
         elif template == RuleTemplate.COPY:
             summary["changed_attribute"] = axis or "copy_pattern"
@@ -517,8 +634,10 @@ class PCRARDatasetGenerator:
             summary["changed_attribute"] = "leaf_count"
             summary["description"] = f"Count transition with direction={params.direction}"
         elif template == RuleTemplate.CONSERVATION:
-            summary["changed_attribute"] = "paired_size_levels"
-            summary["description"] = f"Conservation: leaf{params.leaf_idx} +1 and leaf{params.direction} -1"
+            steps = PCRARDatasetGenerator._conservation_leaf_steps(params)
+            step_desc = ", ".join([f"leaf{leaf_idx} {step:+d}" for leaf_idx, step in steps])
+            summary["changed_attribute"] = "multi_leaf_size_levels"
+            summary["description"] = f"Conservation: {step_desc} per T" if step_desc else "Conservation on size levels"
         elif template == RuleTemplate.PERMUTATION:
             summary["changed_attribute"] = "slot_permutation"
             summary["description"] = f"Permutation over slots with direction={params.direction}"
@@ -552,10 +671,16 @@ class PCRARDatasetGenerator:
             elif axis == "d":
                 detail["per_T_change"] = {"attribute": "density_preset_idx", "step": int(params.direction)}
         elif template == RuleTemplate.CYCLE:
+            attr_map = {
+                CYCLE_AXIS_DENSITY: "density_preset_idx",
+                CYCLE_AXIS_SIZE: "size_level(all_leaves)",
+                CYCLE_AXIS_SHAPE: "primitive_type(all_leaves)",
+                CYCLE_AXIS_COLOR: "color_preset_idx",
+            }
             detail["per_T_change"] = {
-                "attribute": "primitive_type",
-                "leaf_indices": params.leaf_indices if params.leaf_indices is not None else [params.leaf_idx],
-                "directions": params.directions if params.directions is not None else [params.direction],
+                "attribute": attr_map.get(axis, axis),
+                "direction": int(params.direction),
+                "distribution": "distribute-three",
             }
         elif template == RuleTemplate.COPY:
             detail["per_T_change"] = {"attribute": params.axis, "direction": int(params.direction)}
@@ -566,12 +691,10 @@ class PCRARDatasetGenerator:
                 "cycle": "1->2->3->1 (direction=+1) or reverse (direction=-1)",
             }
         elif template == RuleTemplate.CONSERVATION:
+            steps = PCRARDatasetGenerator._conservation_leaf_steps(params)
             detail["per_T_change"] = {
-                "attribute": "paired_size_levels",
-                "plus_leaf": int(params.leaf_idx) if params.leaf_idx is not None else None,
-                "minus_leaf": int(params.direction) if params.direction is not None else None,
-                "plus_step": 1,
-                "minus_step": -1,
+                "attribute": "multi_leaf_size_levels",
+                "leaf_steps": [{"leaf": int(leaf_idx), "step": int(step)} for leaf_idx, step in steps],
             }
         elif template == RuleTemplate.PERMUTATION:
             detail["per_T_change"] = {"attribute": "slot_permutation", "direction": int(params.direction)}
@@ -691,18 +814,21 @@ class PCRARDatasetGenerator:
                 per_t = "one progression attribute changes per T"
                 stride = "horizontal and vertical both apply repeated progression steps"
         elif template == RuleTemplate.CYCLE:
-            leaf_indices = params.leaf_indices if params.leaf_indices is not None else [params.leaf_idx]
-            leaf_indices = [int(i) for i in leaf_indices if i is not None]
-            directions = params.directions if params.directions is not None else [params.direction] * max(1, len(leaf_indices))
-            leaf_desc = []
-            for idx, leaf_idx in enumerate(leaf_indices):
-                direction = int(directions[idx]) if idx < len(directions) else int(params.direction)
-                leaf_desc.append(f"leaf{leaf_idx}:{_shift_word(direction)}")
-            leaf_part = ", ".join(leaf_desc) if leaf_desc else "selected leaves"
-            per_t = (
-                "primitive_type cycles over Sphere->Box->Cylinder->Cone "
-                f"on {leaf_part}"
-            )
+            direction = int(params.direction)
+            cycle_dir = "forward" if direction >= 0 else "reverse"
+            if axis == CYCLE_AXIS_DENSITY:
+                triplet = " -> ".join(str(int(x)) for x in CYCLE_DENSITY_INDICES)
+                per_t = f"density level cycles in distribute-three order ({triplet}), {cycle_dir}"
+            elif axis == CYCLE_AXIS_SIZE:
+                triplet = " -> ".join(x.value for x in CYCLE_SIZE_LEVELS)
+                per_t = f"all leaves share one size level and cycle in distribute-three order ({triplet}), {cycle_dir}"
+            elif axis == CYCLE_AXIS_SHAPE:
+                triplet = " -> ".join(x.value for x in CYCLE_SHAPE_LEVELS)
+                per_t = f"all leaves share one primitive type and cycle in distribute-three order ({triplet}), {cycle_dir}"
+            elif axis == CYCLE_AXIS_COLOR:
+                per_t = "entity color cycles in distribute-three order (red -> green -> blue), " + cycle_dir
+            else:
+                per_t = f"cycle distribute-three on axis {axis}, {cycle_dir}"
             stride = (
                 f"horizontal applies T^{int(k_h)} cycle steps; "
                 f"vertical applies T^{int(k_v)} cycle steps"
@@ -731,9 +857,9 @@ class PCRARDatasetGenerator:
                 f"vertical applies T^{int(k_v)} count transitions"
             )
         elif template == RuleTemplate.CONSERVATION:
-            plus_leaf = int(params.leaf_idx) if params.leaf_idx is not None else None
-            minus_leaf = int(params.direction) if params.direction is not None else None
-            per_t = f"size conservation pair: leaf{plus_leaf} +1 level, leaf{minus_leaf} -1 level"
+            steps = PCRARDatasetGenerator._conservation_leaf_steps(params)
+            step_desc = ", ".join([f"leaf{leaf_idx}:{_shift_word(int(step))}" for leaf_idx, step in steps])
+            per_t = f"size conservation triplet: {step_desc}" if step_desc else "size conservation over selected leaves"
             stride = (
                 f"horizontal applies T^{int(k_h)} conservation transitions; "
                 f"vertical applies T^{int(k_v)} conservation transitions"
@@ -828,7 +954,7 @@ class PCRARDatasetGenerator:
                     params_v=params_v,
                     perturbation_type=selected_perturbation_type,
                 )
-                write_ply(path, points, color=GRID_COLOR_MAP.get((r, c), (200, 200, 200)))
+                write_ply(path, points, color=color_rgb(grid[r][c].obs.color_preset_idx))
                 grid_paths[r][c] = f"{sample_id}/{filename}"
                 grid_clouds[r][c] = points
 
@@ -838,7 +964,7 @@ class PCRARDatasetGenerator:
             filename = f"cand_{i}.ply"
             path = sample_dir / filename
             points = entity.sample_point_cloud(self.rng, n_points=None)
-            write_ply(path, points, color=CAND_COLOR_MAP.get(i, (180, 180, 180)))
+            write_ply(path, points, color=color_rgb(entity.obs.color_preset_idx))
             candidate_paths.append(f"{sample_id}/{filename}")
             candidate_clouds.append(points)
 
@@ -1069,31 +1195,34 @@ class PCRARDatasetGenerator:
             return
 
         entries: List[Dict[str, Any]] = []
-        copy_axis_plan: Optional[List[str]] = None
-        if (
-            mode == "matrix"
-            and self.config.rule_filter
-            and len(self.config.rule_filter) == 1
-            and RuleTemplate.COPY in self.config.rule_filter
-        ):
-            axes = ["copy_size_cycle", "copy_shape_cycle"]
-            base = num_samples // len(axes)
-            remainder = num_samples % len(axes)
-            copy_axis_plan = []
-            for i, axis in enumerate(axes):
-                count = base + (1 if i < remainder else 0)
-                copy_axis_plan.extend([axis] * count)
-            self.rng.shuffle(copy_axis_plan)
+        preferred_axis_plan: Optional[List[str]] = None
+        if mode == "matrix" and self.config.rule_filter and len(self.config.rule_filter) == 1:
+            template = self._normalize_template_name(next(iter(self.config.rule_filter)))
+            axes: Optional[List[str]] = None
+            if template == RuleTemplate.CYCLE:
+                axes = [CYCLE_AXIS_DENSITY, CYCLE_AXIS_SIZE, CYCLE_AXIS_SHAPE, CYCLE_AXIS_COLOR]
+            elif template == RuleTemplate.PROGRESSION:
+                # Keep progression exams balanced between size and pose questions.
+                axes = ["r", "R"]
+            elif template == RuleTemplate.SYMMETRY:
+                axes = ["r", "R"]
+
+            if axes:
+                base = num_samples // len(axes)
+                remainder = num_samples % len(axes)
+                preferred_axis_plan = []
+                for i, axis in enumerate(axes):
+                    count = base + (1 if i < remainder else 0)
+                    preferred_axis_plan.extend([axis] * count)
+                self.rng.shuffle(preferred_axis_plan)
 
         max_attempts = 30
         for idx in range(num_samples):
             last_err: Optional[Exception] = None
-            preferred_axis = copy_axis_plan[idx] if copy_axis_plan else None
-            per_sample_attempts = max_attempts
-            if preferred_axis:
-                # 目标轴约束下适当放宽重试次数，保证轴分布可达
-                per_sample_attempts = 120
-            for _ in range(per_sample_attempts):
+            preferred_axis = preferred_axis_plan[idx] if preferred_axis_plan else None
+            generated = False
+            preferred_attempts = 120 if preferred_axis else max_attempts
+            for _ in range(preferred_attempts):
                 try:
                     entry = self.generate_sample(
                         output_root=output_root,
@@ -1102,13 +1231,33 @@ class PCRARDatasetGenerator:
                         preferred_axis=preferred_axis,
                     )
                     entries.append(entry)
+                    generated = True
                     break
                 except RuntimeError as exc:
                     last_err = exc
                     continue
-            else:
+
+            # Fallback: if preferred-axis generation is too strict for current random state,
+            # retry without axis constraint to keep dataset generation robust.
+            if (not generated) and preferred_axis:
+                for _ in range(max_attempts):
+                    try:
+                        entry = self.generate_sample(
+                            output_root=output_root,
+                            sample_index=idx,
+                            mode="matrix",
+                            preferred_axis=None,
+                        )
+                        entries.append(entry)
+                        generated = True
+                        break
+                    except RuntimeError as exc:
+                        last_err = exc
+                        continue
+
+            if not generated:
                 raise RuntimeError(
-                    f"Failed to generate matrix sample {idx} after {per_sample_attempts} attempts: {last_err}"
+                    f"Failed to generate matrix sample {idx} after {preferred_attempts + (max_attempts if preferred_axis else 0)} attempts: {last_err}"
                 )
 
         write_meta(output_root / "meta.json", entries)
