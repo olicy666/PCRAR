@@ -30,8 +30,8 @@ BIG_VIEW_CAMERA_FIT_MARGIN = 1.0
 # 规则名称映射
 RULE_NAMES = {
     RuleTemplate.PROGRESSION: "递进规则",
-    RuleTemplate.CYCLE: "循环规则（含拷贝）",
-    RuleTemplate.COPY: "循环规则（含拷贝）",
+    RuleTemplate.CYCLE: "循环规则",
+    RuleTemplate.COPY: "循环规则",
     RuleTemplate.COUNT: "增减规则",
     RuleTemplate.CONSERVATION: "守恒规则",
     RuleTemplate.PERMUTATION: "置换规则",
@@ -826,7 +826,7 @@ def render_exam() -> None:
         st.subheader("规则说明")
         rule_desc = {
             "递进规则 (Progression)": "属性沿固定步长变化：尺寸/姿态/位置的递进",
-            "循环规则 (Cycle，含原 Copy)": "固定 3 档循环：密度 / 尺寸 / 形状 / 颜色（同一行/列三格各出现一次）",
+            "循环规则 (Cycle)": "固定 3 档循环：密度 / 尺寸 / 形状 / 颜色（同一行/列三格各出现一次）",
             "增减规则 (Count)": "叶节点数量变化：2↔3",
             "守恒规则 (Conservation)": "尺寸守恒：固定3个几何体联动（+1/-1/0）",
             "置换规则 (Permutation)": "位置槽位循环置换",
