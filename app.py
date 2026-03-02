@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
 import tempfile
@@ -37,6 +36,28 @@ RULE_NAMES = {
     RuleTemplate.PERMUTATION: "置换规则",
     RuleTemplate.SYMMETRY: "对称规则",
 }
+
+RULE_SHORT_NAMES = {
+    RuleTemplate.PROGRESSION: "递进",
+    RuleTemplate.CYCLE: "循环",
+    RuleTemplate.COPY: "循环",
+    RuleTemplate.COUNT: "增减",
+    RuleTemplate.CONSERVATION: "守恒",
+    RuleTemplate.PERMUTATION: "置换",
+    RuleTemplate.SYMMETRY: "对称",
+}
+
+ERROR_TYPE_KEYS = ["analogical_wrong_relation", "perceptual_plausible", "irrelevant"]
+ATTRIBUTE_LABELS = {
+    "shape": "形状",
+    "size": "尺寸",
+    "density": "密度",
+    "color": "颜色",
+    "count": "数量",
+    "rotation": "姿态",
+    "position": "位置",
+}
+ATTRIBUTE_ORDER = list(ATTRIBUTE_LABELS.keys())
 
 # Streamlit 端展示的规则集合：Copy 已并入 Cycle，不再单独出题。
 MODE_RULE_TEMPLATES: List[RuleTemplate] = [
@@ -83,6 +104,26 @@ def get_mode_description(mode: str) -> str:
     return f"{rule_name} ({template.value})"
 
 
+def mode_display_name(mode: str) -> str:
+    """把 mode 统一转换为管理员后台展示名称。"""
+    if not isinstance(mode, str):
+        return str(mode)
+    text = mode.strip()
+    if not text:
+        return ""
+    if text in RULE_SHORT_NAMES.values():
+        return text
+    if text.startswith("矩阵推理-规则"):
+        try:
+            return RULE_SHORT_NAMES[canonical_template(parse_mode(text))]
+        except Exception:
+            return text
+    for template, short_name in RULE_SHORT_NAMES.items():
+        if text == template.value:
+            return short_name
+    return text
+
+
 def normalize_template_value(template_name: str, default: RuleTemplate) -> str:
     """把 meta 中的规则名标准化为当前语义（Copy 归并到 Cycle）。"""
     try:
@@ -91,13 +132,90 @@ def normalize_template_value(template_name: str, default: RuleTemplate) -> str:
         tpl = default
     return canonical_template(tpl).value
 
+
+def axis_to_attribute(axis: Optional[str]) -> Optional[str]:
+    """把规则轴映射到可统计的属性。"""
+    if not axis:
+        return None
+    key = str(axis).strip()
+    direct_map = {
+        "r": "size",
+        "R": "rotation",
+        "p": "position",
+        "count": "count",
+        "size_conservation": "size",
+        "slot_permutation": "position",
+        "cycle_shape_distribute3": "shape",
+        "cycle_size_distribute3": "size",
+        "cycle_density_distribute3": "density",
+        "cycle_color_distribute3": "color",
+        "copy_shape_cycle": "shape",
+        "copy_size_cycle": "size",
+        "copy_density_cycle": "density",
+        "shape": "shape",
+        "size": "size",
+        "density": "density",
+        "color": "color",
+    }
+    if key in direct_map:
+        return direct_map[key]
+    if "shape" in key:
+        return "shape"
+    if "size" in key:
+        return "size"
+    if "density" in key:
+        return "density"
+    if "color" in key:
+        return "color"
+    if "count" in key:
+        return "count"
+    if "slot" in key or "position" in key:
+        return "position"
+    if "rot" in key or "pose" in key:
+        return "rotation"
+    return None
+
+
+def template_default_attribute(template_name: Optional[str]) -> Optional[str]:
+    if not template_name:
+        return None
+    mapping = {
+        RuleTemplate.COUNT.value: "count",
+        RuleTemplate.CONSERVATION.value: "size",
+        RuleTemplate.PERMUTATION.value: "position",
+    }
+    return mapping.get(str(template_name))
+
+
+def extract_question_attributes(entry: Dict) -> List[str]:
+    """提取题目涉及属性（含横/纵两个关系参数）。"""
+    attrs = set()
+    rule = entry.get("rule", {})
+    param_candidates = [
+        rule.get("params", {}) if isinstance(rule, dict) else {},
+        rule.get("vertical_params", {}) if isinstance(rule, dict) else {},
+        entry.get("rule_params", {}),
+        entry.get("rule_params_vertical", {}),
+    ]
+    for params in param_candidates:
+        if not isinstance(params, dict):
+            continue
+        attr = axis_to_attribute(params.get("axis"))
+        if attr:
+            attrs.add(attr)
+    template_name = entry.get("rule_template") or (rule.get("template") if isinstance(rule, dict) else None)
+    fallback_attr = template_default_attribute(template_name)
+    if fallback_attr:
+        attrs.add(fallback_attr)
+    return [name for name in ATTRIBUTE_ORDER if name in attrs]
+
 MODE_IDS = generate_mode_list()
 DIFFICULTY_IDS = ["easy", "hard"]
 DIFFICULTY_LABELS = {
     "easy": "简单（Easy）",
     "hard": "困难（Hard）",
 }
-RECORD_COLUMNS = ["username", "mode", "difficulty", "score", "total", "accuracy", "reason", "result_path"]
+RECORD_COLUMNS = ["username", "mode", "score", "total", "accuracy", "reason"]
 
 
 def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: int = 0) -> None:
@@ -569,6 +687,9 @@ def build_result(
     details = []
     correct_count = 0
     wrong_reasons: List[str] = []
+    wrong_type_counts = Counter()
+    attribute_exposure_counts = Counter()
+    attribute_wrong_counts = Counter()
     for idx, entry in enumerate(meta):
         user_option = answers.get(idx)
         # 新格式使用 gt_label
@@ -577,6 +698,7 @@ def build_result(
         candidate_paths = entry.get("candidate_paths", [])
         labels = [chr(ord("A") + i) for i in range(len(candidate_paths))]
         candidate_notes = entry.get("notes", {}).get("candidate_notes", [])
+        candidate_types = entry.get("distractor_types", [])
         cand_reasons = {}
         for i, label in enumerate(labels):
             if i < len(candidate_notes):
@@ -585,6 +707,16 @@ def build_result(
                 cand_reasons[label] = "符合规则的正确答案"
             else:
                 cand_reasons[label] = "干扰项"
+
+        selected_idx = labels.index(user_option) if user_option in labels else None
+        selected_type = (
+            candidate_types[selected_idx]
+            if selected_idx is not None and selected_idx < len(candidate_types)
+            else None
+        )
+        question_attrs = extract_question_attributes(entry)
+        for attr in question_attrs:
+            attribute_exposure_counts[attr] += 1
         
         is_correct = user_option == gt_option
         if is_correct:
@@ -595,6 +727,10 @@ def build_result(
             wrong_reason = cand_reasons.get(user_option, "")
         if not is_correct:
             wrong_reasons.append(wrong_reason or "未知原因")
+            if selected_type in ERROR_TYPE_KEYS:
+                wrong_type_counts[selected_type] += 1
+            for attr in question_attrs:
+                attribute_wrong_counts[attr] += 1
         
         # 获取规则信息
         rule_info = entry.get("rule", {})
@@ -609,6 +745,8 @@ def build_result(
                 "gt_option": gt_option,
                 "user_option": user_option,
                 "is_correct": is_correct,
+                "selected_distractor_type": selected_type,
+                "question_attributes": [ATTRIBUTE_LABELS.get(a, a) for a in question_attrs],
             }
         )
     total = len(meta)
@@ -618,6 +756,34 @@ def build_result(
         counts = Counter(wrong_reasons)
         total_wrong = sum(counts.values())
         reason_ratio = {k: round(v / total_wrong, 4) for k, v in counts.items()}
+
+    typed_wrong_total = sum(wrong_type_counts.get(k, 0) for k in ERROR_TYPE_KEYS)
+    error_type_ratio = {
+        k: round((wrong_type_counts.get(k, 0) / typed_wrong_total), 4) if typed_wrong_total else 0.0
+        for k in ERROR_TYPE_KEYS
+    }
+
+    attr_error_rate_raw = {}
+    for attr in ATTRIBUTE_ORDER:
+        exposed = int(attribute_exposure_counts.get(attr, 0))
+        if exposed <= 0:
+            continue
+        attr_error_rate_raw[attr] = float(attribute_wrong_counts.get(attr, 0)) / float(exposed)
+    attr_rate_sum = sum(attr_error_rate_raw.values())
+    error_attribute_rate = {
+        ATTRIBUTE_LABELS[attr]: round(rate, 4)
+        for attr, rate in attr_error_rate_raw.items()
+    }
+    error_attribute_ratio_normalized = {
+        ATTRIBUTE_LABELS[attr]: round((rate / attr_rate_sum), 4) if attr_rate_sum else 0.0
+        for attr, rate in attr_error_rate_raw.items()
+    }
+    attribute_exposure_ratio = {
+        ATTRIBUTE_LABELS[attr]: round(float(attribute_exposure_counts[attr]) / float(total), 4) if total else 0.0
+        for attr in ATTRIBUTE_ORDER
+        if int(attribute_exposure_counts.get(attr, 0)) > 0
+    }
+
     return {
         "username": username,
         "mode": mode,
@@ -626,17 +792,19 @@ def build_result(
         "score": correct_count,
         "accuracy": round(accuracy, 4),
         "error_reason_ratio": reason_ratio,
+        "error_type_ratio": error_type_ratio,
+        "error_attribute_rate": error_attribute_rate,
+        "error_attribute_ratio_normalized": error_attribute_ratio_normalized,
+        "attribute_exposure_ratio": attribute_exposure_ratio,
         "questions": details,
     }
 
 
 def append_record(record: Dict) -> None:
-    file_exists = RECORDS_PATH.exists()
-    with RECORDS_PATH.open("a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=RECORD_COLUMNS)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(record)
+    df = load_records()
+    new_row = pd.DataFrame([{key: record.get(key) for key in RECORD_COLUMNS}], columns=RECORD_COLUMNS)
+    updated = pd.concat([df, new_row], ignore_index=True)
+    updated.to_csv(RECORDS_PATH, index=False)
 
 
 def safe_slug(text: str) -> str:
@@ -654,7 +822,10 @@ def load_records() -> pd.DataFrame:
     for col in RECORD_COLUMNS:
         if col not in df.columns:
             df[col] = None
-    return df[RECORD_COLUMNS]
+    normalized_df = df[RECORD_COLUMNS].copy()
+    if list(df.columns) != RECORD_COLUMNS:
+        normalized_df.to_csv(RECORDS_PATH, index=False)
+    return normalized_df
 
 
 def render_admin() -> None:
@@ -671,16 +842,20 @@ def render_admin() -> None:
         st.info("暂无考试记录。")
         return
 
+    display_df = df.copy()
+    display_df["mode"] = display_df["mode"].apply(mode_display_name)
+
     st.subheader("考试记录")
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(display_df, use_container_width=True)
 
     st.subheader("删除考试记录")
     df = df.reset_index(drop=True)
+    display_df = display_df.reset_index(drop=True)
     label_to_index = {}
     option_labels = []
-    for idx, row in df.iterrows():
+    for idx, row in display_df.iterrows():
         label = (
-            f"{idx + 1}: {row.get('username', '')} | {row.get('mode', '')} | {row.get('difficulty', '')} | "
+            f"{idx + 1}: {row.get('username', '')} | {row.get('mode', '')} | "
             f"{row.get('score', '')}/{row.get('total', '')} | {row.get('accuracy', '')}"
         )
         option_labels.append(label)
@@ -700,44 +875,17 @@ def render_admin() -> None:
     user_acc = df.groupby("username")["accuracy"].mean().sort_values(ascending=False)
     st.bar_chart(user_acc)
 
-    st.subheader("下载答题结果")
-    df = df.reset_index(drop=True)
-    downloadable = df[df["result_path"].notna() & df["result_path"].astype(str).str.len() > 0]
-    if downloadable.empty:
-        st.info("暂无可下载的 result.json。")
-    else:
-        label_to_path = {}
-        options = []
-        for idx, row in downloadable.iterrows():
-            label = (
-                f"{idx + 1}: {row.get('username', '')} | {row.get('mode', '')} | {row.get('difficulty', '')} | "
-                f"{row.get('score', '')}/{row.get('total', '')}"
-            )
-            options.append(label)
-            label_to_path[label] = Path(str(row.get("result_path", "")))
-        selected_label = st.selectbox("选择记录", options)
-        selected_path = label_to_path.get(selected_label)
-        if selected_path and selected_path.exists():
-            st.download_button(
-                "下载 result.json",
-                data=selected_path.read_bytes(),
-                file_name=selected_path.name,
-                mime="application/json",
-            )
-        else:
-            st.warning("该记录的 result.json 文件不存在。")
-
     st.subheader("各规则平均正确率")
-    mode_acc = df.groupby("mode")["accuracy"].mean()
+    mode_acc = display_df.groupby("mode")["accuracy"].mean()
     rule_df = pd.DataFrame(
-        {"正确率": [mode_acc.get(m, 0.0) for m in MODE_IDS]},
-        index=[m.split("-")[1] for m in MODE_IDS],
+        {"正确率": [mode_acc.get(name, 0.0) for name in ["递进", "循环", "增减", "守恒", "置换", "对称"]]},
+        index=["递进", "循环", "增减", "守恒", "置换", "对称"],
     )
     st.bar_chart(rule_df)
 
     st.download_button(
         "下载 CSV",
-        data=RECORDS_PATH.read_bytes(),
+        data=df.to_csv(index=False).encode("utf-8"),
         file_name="exam_records.csv",
         mime="text/csv",
     )
@@ -1030,15 +1178,20 @@ def render_exam() -> None:
         persistent_path = RESULTS_DIR / filename
         persistent_path.write_text(st.session_state.result_json, encoding="utf-8")
         if not st.session_state.result_saved:
+            reason_payload = {
+                "error_type_ratio": result.get("error_type_ratio", {}),
+                "error_attribute_rate": result.get("error_attribute_rate", {}),
+                "error_attribute_ratio_normalized": result.get("error_attribute_ratio_normalized", {}),
+                "attribute_exposure_ratio": result.get("attribute_exposure_ratio", {}),
+                "error_reason_ratio": result.get("error_reason_ratio", {}),
+            }
             record = {
                 "username": st.session_state.username,
-                "mode": st.session_state.mode,
-                "difficulty": st.session_state.difficulty,
+                "mode": mode_display_name(st.session_state.mode),
                 "score": result["score"],
                 "total": result["total"],
                 "accuracy": result["accuracy"],
-                "reason": json.dumps(result["error_reason_ratio"], ensure_ascii=False),
-                "result_path": str(persistent_path),
+                "reason": json.dumps(reason_payload, ensure_ascii=False),
             }
             append_record(record)
             st.session_state.result_saved = True

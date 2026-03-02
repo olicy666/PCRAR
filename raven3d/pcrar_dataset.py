@@ -490,6 +490,11 @@ class PCRARDatasetGenerator:
             if self.config.rule_filter
             else None
         )
+        if normalized_filter == {RuleTemplate.SYMMETRY} and preferred_axis == "R":
+            # Current matrix constraints only admit size-axis symmetry ("r").
+            # Pose-axis symmetry ("R") is not reachable and should fail fast
+            # instead of burning all retry attempts.
+            raise RuntimeError("symmetry_pose_axis_unavailable_in_matrix_mode")
         for _ in range(max_attempts):
             if normalized_filter == {RuleTemplate.CYCLE}:
                 leaf_count = int(self.rng.integers(2, 4))
@@ -1196,8 +1201,10 @@ class PCRARDatasetGenerator:
 
         entries: List[Dict[str, Any]] = []
         preferred_axis_plan: Optional[List[str]] = None
+        single_template: Optional[RuleTemplate] = None
         if mode == "matrix" and self.config.rule_filter and len(self.config.rule_filter) == 1:
             template = self._normalize_template_name(next(iter(self.config.rule_filter)))
+            single_template = template
             axes: Optional[List[str]] = None
             if template == RuleTemplate.CYCLE:
                 axes = [CYCLE_AXIS_DENSITY, CYCLE_AXIS_SIZE, CYCLE_AXIS_SHAPE, CYCLE_AXIS_COLOR]
@@ -1205,7 +1212,8 @@ class PCRARDatasetGenerator:
                 # Keep progression exams balanced between size and pose questions.
                 axes = ["r", "R"]
             elif template == RuleTemplate.SYMMETRY:
-                axes = ["r", "R"]
+                # Matrix-path symmetry with k_h=k_v=1 is currently feasible on size axis only.
+                axes = ["r"]
 
             if axes:
                 base = num_samples // len(axes)
@@ -1221,8 +1229,10 @@ class PCRARDatasetGenerator:
             last_err: Optional[Exception] = None
             preferred_axis = preferred_axis_plan[idx] if preferred_axis_plan else None
             generated = False
+            attempts_used = 0
             preferred_attempts = 120 if preferred_axis else max_attempts
             for _ in range(preferred_attempts):
+                attempts_used += 1
                 try:
                     entry = self.generate_sample(
                         output_root=output_root,
@@ -1241,6 +1251,7 @@ class PCRARDatasetGenerator:
             # retry without axis constraint to keep dataset generation robust.
             if (not generated) and preferred_axis:
                 for _ in range(max_attempts):
+                    attempts_used += 1
                     try:
                         entry = self.generate_sample(
                             output_root=output_root,
@@ -1258,6 +1269,12 @@ class PCRARDatasetGenerator:
             if not generated:
                 raise RuntimeError(
                     f"Failed to generate matrix sample {idx} after {preferred_attempts + (max_attempts if preferred_axis else 0)} attempts: {last_err}"
+                )
+            if idx == 0 or (idx + 1) % 100 == 0 or (idx + 1) == num_samples:
+                template_name = single_template.value if single_template is not None else "mixed"
+                print(
+                    f"[matrix:{template_name}] progress {idx + 1}/{num_samples} "
+                    f"(attempts_for_last={attempts_used})"
                 )
 
         write_meta(output_root / "meta.json", entries)
