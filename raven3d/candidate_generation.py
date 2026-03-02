@@ -139,6 +139,11 @@ def _make_irrelevant(
     return entity
 
 
+def _align_candidate_color(candidate: PCRAREntity, gt: PCRAREntity) -> None:
+    """Keep candidate color aligned with GT when color is not the tested rule factor."""
+    candidate.obs.color_preset_idx = int(gt.obs.color_preset_idx)
+
+
 def _perturb_cycle_distribute_three(
     gt: PCRAREntity,
     params: RuleParams,
@@ -350,6 +355,8 @@ def generate_candidates(
     if num_options < 4:
         raise ValueError("num_options must be >= 4 for semantic layering")
 
+    lock_color_to_gt = true_rule.template != RuleTemplate.CYCLE
+
     candidates: List[PCRAREntity] = []
     candidate_types: List[str] = []
     distractor_notes: List[str] = []
@@ -381,6 +388,8 @@ def generate_candidates(
         if sampled is None:
             continue
         cand, alt_rule, alt_params = sampled
+        if lock_color_to_gt:
+            _align_candidate_color(cand, gt_entity)
         if _is_duplicate(cand, candidates):
             continue
         if enforce_structure_diversity and (
@@ -421,6 +430,8 @@ def generate_candidates(
             )
         else:
             cand = _perturb_from_gt(gt_entity, level_cfg, rng)
+        if lock_color_to_gt:
+            _align_candidate_color(cand, gt_entity)
         if entities_equal(cand, gt_entity, check_obs=True) or _is_duplicate(cand, candidates):
             continue
         if enforce_structure_diversity and (
@@ -481,6 +492,8 @@ def generate_candidates(
             )
         else:
             cand = _make_irrelevant(grid_context[0][0] or gt_entity, rng)
+        if lock_color_to_gt:
+            _align_candidate_color(cand, gt_entity)
         if _is_duplicate(cand, candidates) or entities_equal(cand, gt_entity, check_obs=True):
             continue
         if enforce_structure_diversity and (
@@ -523,6 +536,8 @@ def generate_candidates(
             for cand in _enumerate_count_only_candidates(grid_context, gt_entity, rng):
                 if len(candidates) >= num_options - 1:
                     break
+                if lock_color_to_gt:
+                    _align_candidate_color(cand, gt_entity)
                 if _is_duplicate(cand, candidates) or entities_equal(cand, gt_entity, check_obs=True):
                     continue
                 if check_consistent_with_true_relation(
