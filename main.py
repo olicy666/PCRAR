@@ -25,7 +25,7 @@ def _parse_csv_ints(text: str) -> Tuple[int, ...]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate 3D reasoning datasets.")
     parser.add_argument("--output", type=str, default="output", help="Output directory")
-    parser.add_argument("--num-samples", type=int, default=3, help="Number of samples to generate")
+    parser.add_argument("--num-samples", type=int, default=10, help="Number of samples to generate")
     parser.add_argument("--points", type=int, default=8192, help="Point count per cloud")
     parser.add_argument("--seed", type=int, default=None, help="Optional random seed")
     parser.add_argument(

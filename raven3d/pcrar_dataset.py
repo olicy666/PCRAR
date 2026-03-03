@@ -1201,6 +1201,7 @@ class PCRARDatasetGenerator:
 
         entries: List[Dict[str, Any]] = []
         preferred_axis_plan: Optional[List[str]] = None
+        planned_axes: Optional[List[str]] = None
         single_template: Optional[RuleTemplate] = None
         if mode == "matrix" and self.config.rule_filter and len(self.config.rule_filter) == 1:
             template = self._normalize_template_name(next(iter(self.config.rule_filter)))
@@ -1216,6 +1217,7 @@ class PCRARDatasetGenerator:
                 axes = ["r"]
 
             if axes:
+                planned_axes = list(axes)
                 base = num_samples // len(axes)
                 remainder = num_samples % len(axes)
                 preferred_axis_plan = []
@@ -1247,8 +1249,8 @@ class PCRARDatasetGenerator:
                     last_err = exc
                     continue
 
-            # Fallback: if preferred-axis generation is too strict for current random state,
-            # retry without axis constraint to keep dataset generation robust.
+            # Fallback: keep the same preferred axis and continue retrying.
+            # This preserves per-attribute balance for each rule-specific exam.
             if (not generated) and preferred_axis:
                 for _ in range(max_attempts):
                     attempts_used += 1
@@ -1257,7 +1259,7 @@ class PCRARDatasetGenerator:
                             output_root=output_root,
                             sample_index=idx,
                             mode="matrix",
-                            preferred_axis=None,
+                            preferred_axis=preferred_axis,
                         )
                         entries.append(entry)
                         generated = True
@@ -1275,6 +1277,21 @@ class PCRARDatasetGenerator:
                 print(
                     f"[matrix:{template_name}] progress {idx + 1}/{num_samples} "
                     f"(attempts_for_last={attempts_used})"
+                )
+
+        if mode == "matrix" and single_template is not None and planned_axes:
+            axis_counts: Dict[str, int] = {axis: 0 for axis in planned_axes}
+            for entry in entries:
+                params = entry.get("rule_params", {})
+                axis = params.get("axis") if isinstance(params, dict) else None
+                if single_template == RuleTemplate.CYCLE:
+                    axis = self._normalize_cycle_axis_name(axis)
+                if axis in axis_counts:
+                    axis_counts[str(axis)] += 1
+            counts = [axis_counts[a] for a in planned_axes]
+            if counts and (max(counts) - min(counts) > 1):
+                raise RuntimeError(
+                    f"Axis balance check failed for {single_template.value}: {axis_counts}"
                 )
 
         write_meta(output_root / "meta.json", entries)

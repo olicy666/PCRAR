@@ -796,12 +796,14 @@ class PCRARDatasetGenerator:
         self.rng.shuffle(task_types)
         
         axis_plan: Optional[List[str]] = None
+        planned_axes: Optional[List[str]] = None
         if (
             self.config.rule_filter
             and len(self.config.rule_filter) == 1
             and RuleTemplate.PROGRESSION in self.config.rule_filter
         ):
             axes = ["r", "R", "p", "d"]
+            planned_axes = list(axes)
             base = num_samples // len(axes)
             remainder = num_samples % len(axes)
             axis_plan = []
@@ -815,6 +817,7 @@ class PCRARDatasetGenerator:
             and RuleTemplate.COPY in self.config.rule_filter
         ):
             axes = ["copy_size_cycle", "copy_density_cycle", "copy_shape_cycle"]
+            planned_axes = list(axes)
             base = num_samples // len(axes)
             remainder = num_samples % len(axes)
             axis_plan = []
@@ -829,6 +832,7 @@ class PCRARDatasetGenerator:
         ):
             # 均衡 Symmetry 的姿态/尺寸/密度三种属性（不包含位置）
             axes = ["R", "r", "d"]
+            planned_axes = list(axes)
             base = num_samples // len(axes)
             remainder = num_samples % len(axes)
             axis_plan = []
@@ -842,6 +846,8 @@ class PCRARDatasetGenerator:
             "Failed to generate unique distractors.",
             "Failed to sample a relational rule that can be applied twice.",
             "Failed to sample an analogical rule for the given config.",
+            "Copy axis mismatch; retrying to enforce 1/3 density ratio.",
+            "Axis mismatch; retrying to enforce balanced axis plan.",
         }
         max_sample_attempts = 20
         for idx in range(num_samples):
@@ -858,10 +864,20 @@ class PCRARDatasetGenerator:
                         correct_idx=correct_idx,
                         preferred_axis=preferred_axis,
                     )
+                    actual_axis = entry.get("rule", {}).get("params", {}).get("axis")
+                    if (
+                        preferred_axis
+                        and self.config.rule_filter
+                        and len(self.config.rule_filter) == 1
+                    ):
+                        only_template = next(iter(self.config.rule_filter))
+                        if only_template in {RuleTemplate.PROGRESSION, RuleTemplate.COPY, RuleTemplate.SYMMETRY}:
+                            if actual_axis != preferred_axis:
+                                raise RuntimeError("Axis mismatch; retrying to enforce balanced axis plan.")
                     if (
                         self.config.rule_filter == {RuleTemplate.COPY}
                         and preferred_axis
-                        and entry.get("rule", {}).get("params", {}).get("axis") != preferred_axis
+                        and actual_axis != preferred_axis
                     ):
                         raise RuntimeError("Copy axis mismatch; retrying to enforce 1/3 density ratio.")
                     break
@@ -874,6 +890,23 @@ class PCRARDatasetGenerator:
                     f"Failed to generate sample {idx} after {max_sample_attempts} attempts: {last_err}"
                 )
             all_entries.append(entry)
+
+        if planned_axes:
+            axis_counts: Dict[str, int] = {axis: 0 for axis in planned_axes}
+            for entry in all_entries:
+                axis = entry.get("rule", {}).get("params", {}).get("axis")
+                if axis in axis_counts:
+                    axis_counts[str(axis)] += 1
+            counts = [axis_counts[a] for a in planned_axes]
+            if counts and (max(counts) - min(counts) > 1):
+                template_name = (
+                    next(iter(self.config.rule_filter)).value
+                    if self.config.rule_filter and len(self.config.rule_filter) == 1
+                    else "unknown"
+                )
+                raise RuntimeError(
+                    f"Axis balance check failed for {template_name}: {axis_counts}"
+                )
         
         # 保存汇总元数据
         write_meta(output_root / "meta.json", all_entries)

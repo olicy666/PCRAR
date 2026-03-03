@@ -17,7 +17,7 @@ from raven3d.pcrar_rules import RuleTemplate
 
 RECORDS_PATH = Path("exam_records.csv")
 RESULTS_DIR = Path("results")
-TOTAL_QUESTIONS = 20
+TOTAL_QUESTIONS = 10
 PLY_HEIGHT = 320
 BIG_PLY_HEIGHT = 720
 POINTS_PER_CLOUD = 8192
