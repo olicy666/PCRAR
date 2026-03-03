@@ -370,12 +370,20 @@ class PCRARDatasetGenerator:
         self,
         params_h: RuleParams,
         params_v: Optional[RuleParams],
+        preferred_type: Optional[str] = None,
+        strict: bool = False,
     ) -> str:
         choices = list(ROW_PERTURB_TYPES)
         if not self._allow_density_perturbation(params_h, params_v):
             choices = [x for x in choices if x != "density"]
         if not choices:
             return "jitter"
+        if preferred_type:
+            target = str(preferred_type).strip().lower()
+            if target in choices:
+                return target
+            if strict:
+                raise RuntimeError(f"preferred_perturbation_type_unavailable:{target}")
         return str(self.rng.choice(choices))
 
     def _apply_point_cloud_perturbation(
@@ -934,6 +942,7 @@ class PCRARDatasetGenerator:
         distractor_types: List[str],
         candidate_notes: List[str],
         alt_relations: List[Dict[str, Any]],
+        preferred_perturbation_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         sample_id = f"sample_{sample_index:06d}"
         sample_dir = output_root / sample_id
@@ -941,7 +950,12 @@ class PCRARDatasetGenerator:
         missing_set = self._normalize_missing_positions(missing_positions)
         self._validate_missing_positions(missing_set)
         missing_positions_sorted = sorted(missing_set)
-        selected_perturbation_type = self._sample_single_perturbation_type(params, params_v)
+        selected_perturbation_type = self._sample_single_perturbation_type(
+            params,
+            params_v,
+            preferred_type=preferred_perturbation_type,
+            strict=preferred_perturbation_type is not None,
+        )
 
         grid_paths: List[List[Optional[str]]] = [[None for _ in range(3)] for _ in range(3)]
         grid_clouds: List[List[Optional[np.ndarray]]] = [[None for _ in range(3)] for _ in range(3)]
@@ -1077,6 +1091,7 @@ class PCRARDatasetGenerator:
         task_type: Optional[str] = None,
         correct_idx: Optional[int] = None,
         preferred_axis: Optional[str] = None,
+        preferred_perturbation_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         del task_type
         output_root = Path(output_root)
@@ -1182,6 +1197,7 @@ class PCRARDatasetGenerator:
             distractor_types=cand_payload["distractor_types"],
             candidate_notes=cand_payload["candidate_notes"],
             alt_relations=cand_payload["alt_relations"],
+            preferred_perturbation_type=preferred_perturbation_type,
         )
 
     def generate_dataset(
@@ -1201,8 +1217,24 @@ class PCRARDatasetGenerator:
 
         entries: List[Dict[str, Any]] = []
         preferred_axis_plan: Optional[List[str]] = None
+        preferred_perturbation_plan: Optional[List[str]] = None
         planned_axes: Optional[List[str]] = None
         single_template: Optional[RuleTemplate] = None
+        if mode == "matrix" and self.config.enable_row_perturbation:
+            perturb_types = list(ROW_PERTURB_TYPES)
+            # When density perturbation is globally disabled on density-based rules,
+            # remove it from the forced-balance plan to avoid impossible allocations.
+            if not self.config.apply_density_perturb_on_density_rules:
+                perturb_types = [x for x in perturb_types if x != "density"]
+            if perturb_types:
+                base = num_samples // len(perturb_types)
+                remainder = num_samples % len(perturb_types)
+                preferred_perturbation_plan = []
+                for i, perturb_type in enumerate(perturb_types):
+                    count = base + (1 if i < remainder else 0)
+                    preferred_perturbation_plan.extend([perturb_type] * count)
+                self.rng.shuffle(preferred_perturbation_plan)
+
         if mode == "matrix" and self.config.rule_filter and len(self.config.rule_filter) == 1:
             template = self._normalize_template_name(next(iter(self.config.rule_filter)))
             single_template = template
@@ -1230,6 +1262,9 @@ class PCRARDatasetGenerator:
         for idx in range(num_samples):
             last_err: Optional[Exception] = None
             preferred_axis = preferred_axis_plan[idx] if preferred_axis_plan else None
+            preferred_perturbation_type = (
+                preferred_perturbation_plan[idx] if preferred_perturbation_plan else None
+            )
             generated = False
             attempts_used = 0
             preferred_attempts = 120 if preferred_axis else max_attempts
@@ -1241,6 +1276,7 @@ class PCRARDatasetGenerator:
                         sample_index=idx,
                         mode="matrix",
                         preferred_axis=preferred_axis,
+                        preferred_perturbation_type=preferred_perturbation_type,
                     )
                     entries.append(entry)
                     generated = True
@@ -1260,6 +1296,7 @@ class PCRARDatasetGenerator:
                             sample_index=idx,
                             mode="matrix",
                             preferred_axis=preferred_axis,
+                            preferred_perturbation_type=preferred_perturbation_type,
                         )
                         entries.append(entry)
                         generated = True
@@ -1292,6 +1329,25 @@ class PCRARDatasetGenerator:
             if counts and (max(counts) - min(counts) > 1):
                 raise RuntimeError(
                     f"Axis balance check failed for {single_template.value}: {axis_counts}"
+                )
+
+        if mode == "matrix" and preferred_perturbation_plan:
+            expected_perturb_counts: Dict[str, int] = {}
+            for perturb_type in preferred_perturbation_plan:
+                expected_perturb_counts[perturb_type] = expected_perturb_counts.get(perturb_type, 0) + 1
+            actual_perturb_counts: Dict[str, int] = {k: 0 for k in expected_perturb_counts}
+            for entry in entries:
+                selected = (
+                    entry.get("point_cloud_row_perturbation", {}).get("selected_type")
+                    if isinstance(entry, dict)
+                    else None
+                )
+                if selected in actual_perturb_counts:
+                    actual_perturb_counts[str(selected)] += 1
+            if actual_perturb_counts != expected_perturb_counts:
+                raise RuntimeError(
+                    "Perturbation balance check failed: "
+                    f"expected={expected_perturb_counts}, actual={actual_perturb_counts}"
                 )
 
         write_meta(output_root / "meta.json", entries)
