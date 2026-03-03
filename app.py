@@ -58,6 +58,13 @@ ATTRIBUTE_LABELS = {
     "position": "位置",
 }
 ATTRIBUTE_ORDER = list(ATTRIBUTE_LABELS.keys())
+PERTURBATION_TYPE_KEYS = ["density", "jitter", "quantize", "outlier"]
+PERTURBATION_LABELS = {
+    "density": "密度降采样",
+    "jitter": "坐标抖动",
+    "quantize": "坐标量化",
+    "outlier": "离群点替换",
+}
 
 # Streamlit 端展示的规则集合：Copy 已并入 Cycle，不再单独出题。
 MODE_RULE_TEMPLATES: List[RuleTemplate] = [
@@ -208,6 +215,18 @@ def extract_question_attributes(entry: Dict) -> List[str]:
     if fallback_attr:
         attrs.add(fallback_attr)
     return [name for name in ATTRIBUTE_ORDER if name in attrs]
+
+
+def extract_perturbation_type(entry: Dict) -> Optional[str]:
+    """提取题目点云扰动类型。"""
+    perturb = entry.get("point_cloud_row_perturbation", {})
+    if not isinstance(perturb, dict):
+        return None
+    selected_type = perturb.get("selected_type")
+    if not isinstance(selected_type, str):
+        return None
+    key = selected_type.strip().lower()
+    return key if key in PERTURBATION_TYPE_KEYS else None
 
 MODE_IDS = generate_mode_list()
 DIFFICULTY_IDS = ["easy", "hard"]
@@ -690,6 +709,8 @@ def build_result(
     wrong_type_counts = Counter()
     attribute_exposure_counts = Counter()
     attribute_wrong_counts = Counter()
+    perturbation_exposure_counts = Counter()
+    perturbation_wrong_counts = Counter()
     for idx, entry in enumerate(meta):
         user_option = answers.get(idx)
         # 新格式使用 gt_label
@@ -715,8 +736,11 @@ def build_result(
             else None
         )
         question_attrs = extract_question_attributes(entry)
+        perturbation_type = extract_perturbation_type(entry)
         for attr in question_attrs:
             attribute_exposure_counts[attr] += 1
+        if perturbation_type:
+            perturbation_exposure_counts[perturbation_type] += 1
         
         is_correct = user_option == gt_option
         if is_correct:
@@ -731,6 +755,8 @@ def build_result(
                 wrong_type_counts[selected_type] += 1
             for attr in question_attrs:
                 attribute_wrong_counts[attr] += 1
+            if perturbation_type:
+                perturbation_wrong_counts[perturbation_type] += 1
         
         # 获取规则信息
         rule_info = entry.get("rule", {})
@@ -747,6 +773,7 @@ def build_result(
                 "is_correct": is_correct,
                 "selected_distractor_type": selected_type,
                 "question_attributes": [ATTRIBUTE_LABELS.get(a, a) for a in question_attrs],
+                "point_cloud_perturbation_type": PERTURBATION_LABELS.get(perturbation_type, perturbation_type),
             }
         )
     total = len(meta)
@@ -783,6 +810,14 @@ def build_result(
         for attr in ATTRIBUTE_ORDER
         if int(attribute_exposure_counts.get(attr, 0)) > 0
     }
+    error_perturbation_ratio = {}
+    perturbation_exposure_ratio = {}
+    for perturb_type in PERTURBATION_TYPE_KEYS:
+        label = PERTURBATION_LABELS.get(perturb_type, perturb_type)
+        exposed = int(perturbation_exposure_counts.get(perturb_type, 0))
+        wrong = int(perturbation_wrong_counts.get(perturb_type, 0))
+        error_perturbation_ratio[label] = round(float(wrong) / float(exposed), 4) if exposed else 0.0
+        perturbation_exposure_ratio[label] = round(float(exposed) / float(total), 4) if total else 0.0
 
     return {
         "username": username,
@@ -796,6 +831,8 @@ def build_result(
         "error_attribute_rate": error_attribute_rate,
         "error_attribute_ratio_normalized": error_attribute_ratio_normalized,
         "attribute_exposure_ratio": attribute_exposure_ratio,
+        "error_perturbation_ratio": error_perturbation_ratio,
+        "perturbation_exposure_ratio": perturbation_exposure_ratio,
         "questions": details,
     }
 
@@ -1183,6 +1220,8 @@ def render_exam() -> None:
                 "error_attribute_rate": result.get("error_attribute_rate", {}),
                 "error_attribute_ratio_normalized": result.get("error_attribute_ratio_normalized", {}),
                 "attribute_exposure_ratio": result.get("attribute_exposure_ratio", {}),
+                "error_perturbation_ratio": result.get("error_perturbation_ratio", {}),
+                "perturbation_exposure_ratio": result.get("perturbation_exposure_ratio", {}),
                 "error_reason_ratio": result.get("error_reason_ratio", {}),
             }
             record = {
