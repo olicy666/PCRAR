@@ -25,6 +25,8 @@ BIG_VIEW_POINT_SIZE_SCALE = 7.5
 BIG_VIEW_GRID_SPACING = 8.0
 BIG_VIEW_ROW_DEPTH = 5.0
 BIG_VIEW_CAMERA_FIT_MARGIN = 1.0
+SINGLE_VIEW_MAX_RENDER_POINTS = 4500
+BIG_VIEW_MAX_RENDER_POINTS_PER_CLOUD = 3000
 
 # 规则名称映射
 RULE_NAMES = {
@@ -293,6 +295,39 @@ def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: in
       const plyText = {ply_json};
       const blob = new Blob([plyText], {{ type: "text/plain" }});
       const url = URL.createObjectURL(blob);
+      const maxRenderPoints = {SINGLE_VIEW_MAX_RENDER_POINTS};
+
+      function downsampleGeometry(geometry, maxPoints) {{
+        const posAttr = geometry.getAttribute("position");
+        if (!posAttr) return geometry;
+        const count = posAttr.count || 0;
+        if (!maxPoints || count <= maxPoints) return geometry;
+
+        const step = count / maxPoints;
+        const sampledPos = new Float32Array(maxPoints * 3);
+        const colorAttr = geometry.getAttribute("color");
+        const sampledColor = colorAttr ? new Float32Array(maxPoints * 3) : null;
+
+        for (let i = 0; i < maxPoints; i++) {{
+          const src = Math.min(count - 1, Math.floor(i * step));
+          sampledPos[i * 3] = posAttr.array[src * 3];
+          sampledPos[i * 3 + 1] = posAttr.array[src * 3 + 1];
+          sampledPos[i * 3 + 2] = posAttr.array[src * 3 + 2];
+          if (sampledColor) {{
+            sampledColor[i * 3] = colorAttr.array[src * 3];
+            sampledColor[i * 3 + 1] = colorAttr.array[src * 3 + 1];
+            sampledColor[i * 3 + 2] = colorAttr.array[src * 3 + 2];
+          }}
+        }}
+
+        const out = new THREE.BufferGeometry();
+        out.setAttribute("position", new THREE.BufferAttribute(sampledPos, 3));
+        if (sampledColor) {{
+          out.setAttribute("color", new THREE.BufferAttribute(sampledColor, 3));
+        }}
+        out.computeBoundingBox();
+        return out;
+      }}
 
       function fitCamera(geometry, material) {{
         geometry.computeBoundingBox();
@@ -326,6 +361,7 @@ def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: in
 
       loader.load(url, (geometry) => {{
         URL.revokeObjectURL(url);
+        geometry = downsampleGeometry(geometry, maxRenderPoints);
         if (geometry.computeVertexNormals) {{
           geometry.computeVertexNormals();
         }}
@@ -445,6 +481,39 @@ def pl_multi_component(
       const box = new THREE.Box3();
       let hasBox = false;
       let pending = 0;
+      const maxRenderPoints = {BIG_VIEW_MAX_RENDER_POINTS_PER_CLOUD};
+
+      function downsampleGeometry(geometry, maxPoints) {{
+        const posAttr = geometry.getAttribute("position");
+        if (!posAttr) return geometry;
+        const count = posAttr.count || 0;
+        if (!maxPoints || count <= maxPoints) return geometry;
+
+        const step = count / maxPoints;
+        const sampledPos = new Float32Array(maxPoints * 3);
+        const colorAttr = geometry.getAttribute("color");
+        const sampledColor = colorAttr ? new Float32Array(maxPoints * 3) : null;
+
+        for (let i = 0; i < maxPoints; i++) {{
+          const src = Math.min(count - 1, Math.floor(i * step));
+          sampledPos[i * 3] = posAttr.array[src * 3];
+          sampledPos[i * 3 + 1] = posAttr.array[src * 3 + 1];
+          sampledPos[i * 3 + 2] = posAttr.array[src * 3 + 2];
+          if (sampledColor) {{
+            sampledColor[i * 3] = colorAttr.array[src * 3];
+            sampledColor[i * 3 + 1] = colorAttr.array[src * 3 + 1];
+            sampledColor[i * 3 + 2] = colorAttr.array[src * 3 + 2];
+          }}
+        }}
+
+        const out = new THREE.BufferGeometry();
+        out.setAttribute("position", new THREE.BufferAttribute(sampledPos, 3));
+        if (sampledColor) {{
+          out.setAttribute("color", new THREE.BufferAttribute(sampledColor, 3));
+        }}
+        out.computeBoundingBox();
+        return out;
+      }}
 
       function fitCamera(bounds) {{
         const size = new THREE.Vector3();
@@ -481,6 +550,7 @@ def pl_multi_component(
         const url = URL.createObjectURL(blob);
         loader.load(url, (geometry) => {{
           URL.revokeObjectURL(url);
+          geometry = downsampleGeometry(geometry, maxRenderPoints);
           if (geometry.computeVertexNormals) {{
             geometry.computeVertexNormals();
           }}
