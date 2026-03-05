@@ -521,12 +521,15 @@ def pl_multi_component(
         bounds.getSize(size);
         bounds.getCenter(center);
 
-        const radius = size.length() * 0.5;
+        // Grid layout is mostly planar; avoid diagonal-length over-zoom-out.
+        const spanXY = Math.max(size.x, size.y);
+        const depthPenalty = size.z * 0.6;
+        const radius = Math.max(spanXY, depthPenalty) * 0.5;
         controls.target.copy(center);
 
         const fov = THREE.MathUtils.degToRad(camera.fov);
         let dist = radius / Math.tan(fov / 2);
-        dist *= 1.15;
+        dist *= 1.05;
 
         const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
         if (dir.lengthSq() < 1e-12) dir.set(0, 0, 1);
