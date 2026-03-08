@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .pcrar_entity import PCRAREntity
+from .pcrar_entity import PCRAREntity, color_rgb
 from .pcrar_rules import RuleParams, RuleTemplate
 
 
@@ -223,7 +223,24 @@ class ConfusingViewGenerator:
         image_size: Tuple[int, int] = (512, 512),
         point_size: float = 2.0,
         background_color: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+        point_color: Optional[Tuple[int, int, int]] = None,
+        proj_scale: float = 1.0,
     ) -> np.ndarray:
+        points_arr = np.asarray(points)
+        if points_arr.ndim != 2 or points_arr.shape[1] < 3:
+            raise ValueError("points must have shape (N,3) or (N,>=6)")
+        xyz = points_arr[:, :3]
+        if points_arr.shape[1] >= 6:
+            point_colors = np.clip(points_arr[:, 3:6], 0, 255).astype(np.uint8)
+        elif point_color is not None:
+            rgb = np.asarray(point_color, dtype=np.uint8).reshape(-1)
+            if rgb.size != 3:
+                raise ValueError("point_color must be a length-3 RGB tuple")
+            point_colors = np.broadcast_to(rgb, (xyz.shape[0], 3)).astype(np.uint8)
+        else:
+            # Backward-compatible fallback color for uncolored point clouds.
+            point_colors = np.broadcast_to(np.array([51, 102, 204], dtype=np.uint8), (xyz.shape[0], 3))
+
         cam_pos = np.array(view_config["camera_position"], dtype=float)
         cam_target = np.array(view_config["camera_target"], dtype=float)
         cam_up = np.array(view_config["camera_up"], dtype=float)
@@ -234,7 +251,7 @@ class ConfusingViewGenerator:
         right = right / (np.linalg.norm(right) + 1e-12)
         up = np.cross(right, forward)
 
-        points_cam = points - cam_pos
+        points_cam = xyz - cam_pos
         points_cam = np.stack(
             [
                 np.dot(points_cam, right),
@@ -249,6 +266,7 @@ class ConfusingViewGenerator:
 
         mask = points_cam[:, 2] > 0.1
         points_cam = points_cam[mask]
+        point_colors = point_colors[mask]
         if len(points_cam) == 0:
             return np.full(
                 (image_size[1], image_size[0], 3),
@@ -258,6 +276,9 @@ class ConfusingViewGenerator:
 
         x_proj = points_cam[:, 0] * f / points_cam[:, 2]
         y_proj = points_cam[:, 1] * f / points_cam[:, 2]
+        proj_scale = float(max(1e-6, proj_scale))
+        x_proj *= proj_scale
+        y_proj *= proj_scale
 
         x_pixel = ((x_proj + 1.0) * 0.5 * image_size[0]).astype(int)
         y_pixel = ((1.0 - y_proj) * 0.5 * image_size[1]).astype(int)
@@ -271,7 +292,6 @@ class ConfusingViewGenerator:
         depth_buffer = np.full((image_size[1], image_size[0]), np.inf)
 
         sort_indices = np.argsort(-depth)
-        point_color = np.array([0.2, 0.4, 0.8]) * 255
         radius = int(point_size)
 
         for idx in sort_indices:
@@ -285,10 +305,93 @@ class ConfusingViewGenerator:
                         continue
                     nx, ny = px + dx, py + dy
                     if 0 <= nx < image_size[0] and 0 <= ny < image_size[1] and d < depth_buffer[ny, nx]:
-                        img[ny, nx] = point_color
+                        img[ny, nx] = point_colors[idx]
                         depth_buffer[ny, nx] = d
 
         return img
+
+    def _project_to_camera(
+        self,
+        points: np.ndarray,
+        view_config: Dict[str, Any],
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        points_arr = np.asarray(points)
+        xyz = points_arr[:, :3]
+
+        cam_pos = np.array(view_config["camera_position"], dtype=float)
+        cam_target = np.array(view_config["camera_target"], dtype=float)
+        cam_up = np.array(view_config["camera_up"], dtype=float)
+
+        forward = cam_target - cam_pos
+        forward = forward / (np.linalg.norm(forward) + 1e-12)
+        right = np.cross(forward, cam_up)
+        right = right / (np.linalg.norm(right) + 1e-12)
+        up = np.cross(right, forward)
+
+        points_cam = xyz - cam_pos
+        points_cam = np.stack(
+            [
+                np.dot(points_cam, right),
+                np.dot(points_cam, up),
+                np.dot(points_cam, forward),
+            ],
+            axis=1,
+        )
+        mask = points_cam[:, 2] > 0.1
+        points_cam = points_cam[mask]
+        if len(points_cam) == 0:
+            return np.empty((0,), dtype=float), np.empty((0,), dtype=float)
+
+        fov_rad = np.radians(float(view_config["fov"]))
+        f = 1.0 / np.tan(fov_rad / 2.0)
+        x_proj = points_cam[:, 0] * f / points_cam[:, 2]
+        y_proj = points_cam[:, 1] * f / points_cam[:, 2]
+        return x_proj, y_proj
+
+    def compute_global_projection_scale(
+        self,
+        point_clouds: List[np.ndarray],
+        view_config: Dict[str, Any],
+        focus_quantile: float = 0.90,
+        target_focus: float = 0.62,
+        safety_quantile: float = 0.999,
+        safety_margin: float = 0.90,
+        min_scale: float = 0.45,
+        max_scale: float = 2.50,
+    ) -> float:
+        projected_abs: List[np.ndarray] = []
+        for points in point_clouds:
+            if points is None:
+                continue
+            x_proj, y_proj = self._project_to_camera(points, view_config)
+            if len(x_proj) == 0:
+                continue
+            # Use per-point projected extent to support robust quantile scaling.
+            projected_abs.append(np.maximum(np.abs(x_proj), np.abs(y_proj)))
+
+        if not projected_abs:
+            return 1.0
+
+        all_abs = np.concatenate(projected_abs, axis=0)
+        if all_abs.size == 0:
+            return 1.0
+
+        fq = float(np.clip(focus_quantile, 0.5, 0.99))
+        sq = float(np.clip(safety_quantile, fq, 0.9999))
+        focus_val = float(np.quantile(all_abs, fq))
+        safety_val = float(np.quantile(all_abs, sq))
+
+        if focus_val <= 1e-6 or safety_val <= 1e-6:
+            return 1.0
+
+        scale = float(target_focus / focus_val)
+        scale = float(np.clip(scale, min_scale, max_scale))
+
+        # Hard safety cap: avoid clipping when a small tail extends to tile edges.
+        if safety_val * scale > safety_margin:
+            scale = float(safety_margin / safety_val)
+        scale = float(np.clip(scale, min_scale, max_scale))
+        return scale
 
     def save_rendered_image(self, img: np.ndarray, output_path: Path) -> None:
         try:
@@ -390,6 +493,14 @@ def generate_confusing_view_for_matrix_sample(
 ) -> Dict[str, Any]:
     generator = ConfusingViewGenerator(rng)
     view_config = generator.select_confusing_viewpoint(rule_template, params, entities)
+    all_point_clouds: List[np.ndarray] = []
+    for row in grid_point_clouds:
+        for points in row:
+            if points is not None:
+                all_point_clouds.append(points)
+    all_point_clouds.extend(candidate_point_clouds)
+    projection_scale = generator.compute_global_projection_scale(all_point_clouds, view_config)
+    entity_iter = iter(entities)
 
     grid_view_paths: List[List[Optional[str]]] = [[None for _ in range(3)] for _ in range(3)]
     grid_images: List[List[Optional[np.ndarray]]] = [[None for _ in range(3)] for _ in range(3)]
@@ -400,7 +511,15 @@ def generate_confusing_view_for_matrix_sample(
             points = grid_point_clouds[r][c]
             if points is None:
                 continue
-            img = generator.render_point_cloud_image(points, view_config, image_size=image_size)
+            entity = next(entity_iter, None)
+            cloud_color = color_rgb(entity.obs.color_preset_idx) if entity is not None else None
+            img = generator.render_point_cloud_image(
+                points,
+                view_config,
+                image_size=image_size,
+                point_color=cloud_color,
+                proj_scale=projection_scale,
+            )
             name = f"view_grid_{r}_{c}.png"
             generator.save_rendered_image(img, output_dir / name)
             grid_view_paths[r][c] = name
@@ -410,7 +529,15 @@ def generate_confusing_view_for_matrix_sample(
     candidate_view_paths: List[str] = []
     candidate_images: List[np.ndarray] = []
     for i, points in enumerate(candidate_point_clouds):
-        img = generator.render_point_cloud_image(points, view_config, image_size=image_size)
+        entity = next(entity_iter, None)
+        cloud_color = color_rgb(entity.obs.color_preset_idx) if entity is not None else None
+        img = generator.render_point_cloud_image(
+            points,
+            view_config,
+            image_size=image_size,
+            point_color=cloud_color,
+            proj_scale=projection_scale,
+        )
         name = f"view_cand_{i}.png"
         generator.save_rendered_image(img, output_dir / name)
         candidate_view_paths.append(name)
@@ -424,6 +551,7 @@ def generate_confusing_view_for_matrix_sample(
 
     return {
         "view_config": view_config,
+        "projection_scale": projection_scale,
         "layout": "matrix_3x3_plus_candidates",
         "grid_view_paths": grid_view_paths,
         "candidate_view_paths": candidate_view_paths,

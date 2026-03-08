@@ -633,9 +633,6 @@ class ConservationRule(PCRARRule):
         leaves = entity.get_leaves()
         if len(leaves) != 3:
             return False
-        # 过滤已经发生明显遮蔽/包裹的状态，避免题面出现“像只有一个几何体”的情况
-        if has_containment_risk(leaves) or has_excessive_overlap(leaves):
-            return False
 
         leaf_steps = self._resolve_triplet_params(leaves, params)
         if leaf_steps is None:
@@ -646,12 +643,6 @@ class ConservationRule(PCRARRule):
             new_idx = size_idx + int(step)
             if not (0 <= new_idx < len(SIZE_LEVELS)):
                 return False
-
-        # 检查应用一步守恒变换后是否会导致包含/过度重叠
-        candidate = self.apply(entity, params)
-        candidate_leaves = candidate.get_leaves()
-        if has_containment_risk(candidate_leaves) or has_excessive_overlap(candidate_leaves):
-            return False
         return True
     
     def apply(self, entity: PCRAREntity, params: RuleParams) -> PCRAREntity:

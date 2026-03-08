@@ -527,6 +527,11 @@ class PCRARDatasetGenerator:
             except RuntimeError:
                 continue
 
+            # Ensure shape-cycle questions start from a homogeneous primitive type.
+            # Preconditions sampled before params may have used a non-shape axis.
+            if rule.template == RuleTemplate.CYCLE and params.axis == CYCLE_AXIS_SHAPE:
+                self._enforce_cycle_preconditions(e00, preferred_axis=CYCLE_AXIS_SHAPE)
+
             rule_v = rule
             params_v = params
             dual_symmetry = rule.template == RuleTemplate.SYMMETRY
@@ -535,7 +540,8 @@ class PCRARDatasetGenerator:
                 e00 = self._prepare_entity_for_symmetry_dual(e00, params)
             else:
                 e00 = prepare_entity_for_rule_path(e00, rule, params, self.level_cfg)
-            if not self._entity_visibility_ok(e00):
+            skip_visibility_checks = rule.template in {RuleTemplate.CONSERVATION, RuleTemplate.SYMMETRY}
+            if (not skip_visibility_checks) and (not self._entity_visibility_ok(e00)):
                 continue
             if dual_symmetry:
                 if not can_apply_k(e00, rule, params, 2 * k_h):
@@ -559,7 +565,7 @@ class PCRARDatasetGenerator:
             except RuntimeError:
                 continue
 
-            if not self._grid_visibility_ok(grid):
+            if (not skip_visibility_checks) and (not self._grid_visibility_ok(grid)):
                 continue
             if rule.template == RuleTemplate.CYCLE and not self._cycle_distribute_three_ok(grid, params):
                 continue
@@ -1161,7 +1167,9 @@ class PCRARDatasetGenerator:
         )
 
         candidates = cand_payload["candidates"]
-        if not all(self._entity_visibility_ok(cand) for cand in candidates):
+        if rule.template not in {RuleTemplate.CONSERVATION, RuleTemplate.SYMMETRY} and not all(
+            self._entity_visibility_ok(cand) for cand in candidates
+        ):
             raise RuntimeError("candidate_visibility_failed")
         gt_index = int(cand_payload["gt_index"]) if correct_idx is None else int(correct_idx)
 

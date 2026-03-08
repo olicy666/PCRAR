@@ -14,7 +14,7 @@ from raven3d.matrix_grid import (
     grid_quality_checks,
 )
 from raven3d.pcrar_entity import PCRAREntity, entities_equal
-from raven3d.pcrar_rules import RuleParams, RuleTemplate, get_rule
+from raven3d.pcrar_rules import CYCLE_AXIS_COLOR, RuleParams, RuleTemplate, get_rule
 
 
 def _load_entries(dataset_dir: Path) -> List[Dict[str, Any]]:
@@ -73,6 +73,7 @@ def validate_entry(entry: Dict[str, Any]) -> None:
     params_v = _to_rule_params(params_v_raw) if params_v_raw else params
     rule_v = get_rule(RuleTemplate(entry["rule_template"])) if params_v_raw else rule
     dual_rule = bool(params_v_raw) and params_v.to_dict() != params.to_dict()
+    is_cycle_color_task = rule.template == RuleTemplate.CYCLE and params.axis == CYCLE_AXIS_COLOR
     k_h = int(entry["k_h"])
     k_v = int(entry["k_v"])
 
@@ -150,6 +151,13 @@ def validate_entry(entry: Dict[str, Any]) -> None:
     ]
     if true_hits != [gt_index]:
         raise AssertionError(f"Expected unique true candidate at {gt_index}, got {true_hits}")
+    if rule.template == RuleTemplate.COUNT:
+        gt_count = candidates[gt_index].leaf_count()
+        for i, cand in enumerate(candidates):
+            if i == gt_index:
+                continue
+            if cand.leaf_count() == gt_count:
+                raise AssertionError("Count distractor shares GT leaf_count")
 
     # 5) At least one alt relation candidate
     alt_specs = entry.get("notes", {}).get("alt_relations", [])
@@ -171,12 +179,16 @@ def validate_entry(entry: Dict[str, Any]) -> None:
             alt_hit_count += 1
 
         ctype = distractor_types[i] if i < len(distractor_types) else ""
-        if ctype == "analogical_wrong_relation" and not matched:
+        if ctype == "analogical_wrong_relation" and not matched and not is_cycle_color_task:
             raise AssertionError("analogical_wrong_relation candidate does not satisfy alt relation")
         if ctype == "perceptual_plausible" and matched:
             raise AssertionError("perceptual_plausible candidate unexpectedly satisfies alt relation")
 
-    if alt_hit_count < 1:
+    if is_cycle_color_task:
+        analogical_count = sum(1 for x in distractor_types if x == "analogical_wrong_relation")
+        if analogical_count < 1:
+            raise AssertionError("No analogical_wrong_relation distractor found")
+    elif alt_hit_count < 1:
         raise AssertionError("No distractor satisfies alt relation")
 
 

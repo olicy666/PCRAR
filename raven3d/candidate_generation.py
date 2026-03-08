@@ -144,6 +144,10 @@ def _align_candidate_color(candidate: PCRAREntity, gt: PCRAREntity) -> None:
     candidate.obs.color_preset_idx = int(gt.obs.color_preset_idx)
 
 
+def _shares_gt_count(candidate: PCRAREntity, gt: PCRAREntity, true_rule: PCRARRule) -> bool:
+    return true_rule.template == RuleTemplate.COUNT and candidate.leaf_count() == gt.leaf_count()
+
+
 def _perturb_cycle_distribute_three(
     gt: PCRAREntity,
     params: RuleParams,
@@ -355,7 +359,10 @@ def generate_candidates(
     if num_options < 4:
         raise ValueError("num_options must be >= 4 for semantic layering")
 
-    lock_color_to_gt = true_rule.template != RuleTemplate.CYCLE
+    is_cycle_color_task = true_rule.template == RuleTemplate.CYCLE and true_params.axis == CYCLE_AXIS_COLOR
+    lock_color_for_analogical = true_rule.template != RuleTemplate.CYCLE or is_cycle_color_task
+    lock_color_for_perceptual = true_rule.template != RuleTemplate.CYCLE
+    lock_color_for_irrelevant = true_rule.template != RuleTemplate.CYCLE or is_cycle_color_task
 
     candidates: List[PCRAREntity] = []
     candidate_types: List[str] = []
@@ -388,8 +395,12 @@ def generate_candidates(
         if sampled is None:
             continue
         cand, alt_rule, alt_params = sampled
-        if lock_color_to_gt:
+        if lock_color_for_analogical:
             _align_candidate_color(cand, gt_entity)
+        if entities_equal(cand, gt_entity, check_obs=True):
+            continue
+        if _shares_gt_count(cand, gt_entity, true_rule):
+            continue
         if _is_duplicate(cand, candidates):
             continue
         if enforce_structure_diversity and (
@@ -399,7 +410,10 @@ def generate_candidates(
             continue
         candidates.append(cand)
         candidate_types.append("analogical_wrong_relation")
-        distractor_notes.append("符合替代关系 T'，但不符合真实关系 T")
+        if is_cycle_color_task:
+            distractor_notes.append("符合替代关系 T'（忽略颜色维度），但不符合真实关系 T")
+        else:
+            distractor_notes.append("符合替代关系 T'，但不符合真实关系 T")
         alt_specs.append(
             {
                 "rule_template": alt_rule.template.value,
@@ -416,23 +430,35 @@ def generate_candidates(
     for _ in range(120):
         if perceptual_added >= mix_cfg.min_perceptual_plausible:
             break
-        if true_rule.template == RuleTemplate.COUNT:
+        perceptual_is_count = False
+        cand: Optional[PCRAREntity] = None
+
+        # Add a count-based perceptual distractor path for non-Count tasks.
+        if true_rule.template != RuleTemplate.COUNT:
             cand = _sample_count_only_candidate(grid_context, gt_entity, rng)
-            if cand is None:
-                continue
-        elif true_rule.template == RuleTemplate.CYCLE:
-            cand = _perturb_cycle_distribute_three(
-                gt_entity,
-                true_params,
-                level_cfg,
-                rng,
-                strong=False,
-            )
-        else:
-            cand = _perturb_from_gt(gt_entity, level_cfg, rng)
-        if lock_color_to_gt:
+            perceptual_is_count = cand is not None
+
+        if cand is None:
+            if true_rule.template == RuleTemplate.COUNT:
+                cand = _sample_count_only_candidate(grid_context, gt_entity, rng)
+                if cand is None:
+                    continue
+                perceptual_is_count = True
+            elif true_rule.template == RuleTemplate.CYCLE:
+                cand = _perturb_cycle_distribute_three(
+                    gt_entity,
+                    true_params,
+                    level_cfg,
+                    rng,
+                    strong=False,
+                )
+            else:
+                cand = _perturb_from_gt(gt_entity, level_cfg, rng)
+        if lock_color_for_perceptual:
             _align_candidate_color(cand, gt_entity)
         if entities_equal(cand, gt_entity, check_obs=True) or _is_duplicate(cand, candidates):
+            continue
+        if _shares_gt_count(cand, gt_entity, true_rule):
             continue
         if enforce_structure_diversity and (
             entities_equal(cand, gt_entity, check_obs=False)
@@ -454,7 +480,7 @@ def generate_candidates(
             continue
         candidates.append(cand)
         candidate_types.append("perceptual_plausible")
-        if true_rule.template == RuleTemplate.COUNT:
+        if perceptual_is_count:
             distractor_notes.append("数量干扰项：仅改变几何体数量，不满足真实/替代关系")
         elif true_rule.template == RuleTemplate.CYCLE:
             axis = true_params.axis
@@ -483,18 +509,24 @@ def generate_candidates(
             if cand is None:
                 continue
         elif true_rule.template == RuleTemplate.CYCLE:
-            cand = _perturb_cycle_distribute_three(
-                gt_entity,
-                true_params,
-                level_cfg,
-                rng,
-                strong=True,
-            )
+            if is_cycle_color_task:
+                # For color-cycle tasks, keep non-perceptual distractor colors aligned with GT.
+                cand = _perturb_from_gt(gt_entity, level_cfg, rng)
+            else:
+                cand = _perturb_cycle_distribute_three(
+                    gt_entity,
+                    true_params,
+                    level_cfg,
+                    rng,
+                    strong=True,
+                )
         else:
             cand = _make_irrelevant(grid_context[0][0] or gt_entity, rng)
-        if lock_color_to_gt:
+        if lock_color_for_irrelevant:
             _align_candidate_color(cand, gt_entity)
         if _is_duplicate(cand, candidates) or entities_equal(cand, gt_entity, check_obs=True):
+            continue
+        if _shares_gt_count(cand, gt_entity, true_rule):
             continue
         if enforce_structure_diversity and (
             entities_equal(cand, gt_entity, check_obs=False)
@@ -525,7 +557,10 @@ def generate_candidates(
             elif axis == CYCLE_AXIS_SIZE:
                 distractor_notes.append("尺寸干扰项：仅改变尺寸档位")
             elif axis == CYCLE_AXIS_COLOR:
-                distractor_notes.append("颜色干扰项：仅改变颜色档位")
+                if is_cycle_color_task:
+                    distractor_notes.append("非颜色干扰项：颜色与 GT 一致")
+                else:
+                    distractor_notes.append("颜色干扰项：仅改变颜色档位")
             else:
                 distractor_notes.append("形状干扰项：仅改变 primitive_type")
         else:
@@ -536,9 +571,11 @@ def generate_candidates(
             for cand in _enumerate_count_only_candidates(grid_context, gt_entity, rng):
                 if len(candidates) >= num_options - 1:
                     break
-                if lock_color_to_gt:
+                if lock_color_for_irrelevant:
                     _align_candidate_color(cand, gt_entity)
                 if _is_duplicate(cand, candidates) or entities_equal(cand, gt_entity, check_obs=True):
+                    continue
+                if _shares_gt_count(cand, gt_entity, true_rule):
                     continue
                 if check_consistent_with_true_relation(
                     cand,
@@ -592,14 +629,19 @@ def generate_candidates(
     if true_hits != [gt_index]:
         raise RuntimeError(f"Expected exactly one true-relation candidate, got hits={true_hits}")
 
-    alt_hit_count = 0
-    for i, cand in enumerate(all_candidates):
-        if i == gt_index:
-            continue
-        if _matches_any_alt(cand, grid_context, alt_specs, k_h, k_v):
-            alt_hit_count += 1
-    if alt_hit_count < mix_cfg.min_analogical_wrong_relation:
-        raise RuntimeError("Not enough alt-relation-consistent distractors")
+    if is_cycle_color_task:
+        analogical_count = sum(1 for ctype in all_types if ctype == "analogical_wrong_relation")
+        if analogical_count < mix_cfg.min_analogical_wrong_relation:
+            raise RuntimeError("Not enough analogical_wrong_relation distractors")
+    else:
+        alt_hit_count = 0
+        for i, cand in enumerate(all_candidates):
+            if i == gt_index:
+                continue
+            if _matches_any_alt(cand, grid_context, alt_specs, k_h, k_v):
+                alt_hit_count += 1
+        if alt_hit_count < mix_cfg.min_analogical_wrong_relation:
+            raise RuntimeError("Not enough alt-relation-consistent distractors")
 
     if enforce_structure_diversity:
         for i in range(len(all_candidates)):
