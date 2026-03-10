@@ -1037,7 +1037,7 @@ def render_exam() -> None:
         
         st.subheader("规则说明")
         rule_desc = {
-            "递进规则 (Progression)": "属性沿固定步长变化：尺寸/姿态/位置的递进",
+            "递进规则 (Progression)": "属性沿固定步长变化：尺寸/姿态的递进",
             "Distribute-three规则 (Distribute-three)": "固定 3 档分布：密度 / 尺寸 / 形状 / 颜色（同一行/列三格各出现一次）",
             "增减规则 (Count)": "叶节点数量变化：2↔3",
             "守恒规则 (Conservation)": "尺寸守恒：固定3个几何体联动（+1/-1/0）",
