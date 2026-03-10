@@ -234,10 +234,9 @@ def extract_perturbation_type(entry: Dict) -> Optional[str]:
     return key if key in PERTURBATION_TYPE_KEYS else None
 
 MODE_IDS = generate_mode_list()
-DIFFICULTY_IDS = ["easy", "hard"]
+DIFFICULTY_IDS = ["easy"]
 DIFFICULTY_LABELS = {
     "easy": "简单（Easy）",
-    "hard": "困难（Hard）",
 }
 RECORD_COLUMNS = ["username", "mode", "score", "total", "accuracy", "reason"]
 
@@ -602,7 +601,7 @@ def init_state() -> None:
         "is_admin": False,
         "username": "",
         "mode": MODE_IDS[0] if MODE_IDS else "",
-        "difficulty": "hard",
+        "difficulty": "easy",
         "question_index": 0,
         "answers": {},
         "exam_generated": False,
@@ -624,7 +623,7 @@ def init_state() -> None:
     if MODE_IDS and st.session_state.get("mode") not in MODE_IDS:
         st.session_state["mode"] = MODE_IDS[0]
     if st.session_state.get("difficulty") not in DIFFICULTY_IDS:
-        st.session_state["difficulty"] = "hard"
+        st.session_state["difficulty"] = "easy"
 
 
 def reset_exam_state() -> None:
@@ -1002,18 +1001,7 @@ def render_exam() -> None:
         reset_exam_state()
         st.sidebar.info("已切换模式，请重新生成试卷。")
 
-    current_difficulty = st.session_state.difficulty
-    diff_idx = DIFFICULTY_IDS.index(current_difficulty) if current_difficulty in DIFFICULTY_IDS else 1
-    new_difficulty = st.sidebar.selectbox(
-        "难度",
-        DIFFICULTY_IDS,
-        index=diff_idx,
-        format_func=lambda x: DIFFICULTY_LABELS.get(x, x),
-    )
-    if new_difficulty != st.session_state.difficulty:
-        st.session_state.difficulty = new_difficulty
-        reset_exam_state()
-        st.sidebar.info("已切换难度，请重新生成试卷。")
+    st.session_state.difficulty = "easy"
     
     # 显示当前模式描述
     st.sidebar.caption(get_mode_description(st.session_state.mode))
@@ -1041,8 +1029,7 @@ def render_exam() -> None:
         st.subheader("考试模式说明")
         st.markdown("""
         - **题型**: 3x3 九宫格矩阵补全（目标格固定右下角，可附加缺失格）
-        - **难度 easy**: 仅遮挡第9格（右下角）
-        - **难度 hard**: 随机遮挡3格（保留用于推理锚点）
+        - **难度**: 固定为 easy，仅遮挡第9格（右下角）
         - **规则**: 同一规则实例 T 作用于整张矩阵
         - **步长**: 横向步长 k_h、纵向步长 k_v，按指数公式生成
         - **目标**: 从候选中选出唯一满足真实关系 T 的目标格
