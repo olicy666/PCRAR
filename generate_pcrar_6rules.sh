@@ -10,7 +10,7 @@ set -euo pipefail
 # - seeds: 1..30
 # - per seed per rule: 10 samples
 # - total per rule: 300 samples
-# - total rules: 6 (Progression, Cycle, Count, Conservation, Permutation, Symmetry)
+# - total rules: 6 (Progression, Distribute-three, Count, Conservation, Permutation, Symmetry)
 
 OUTPUT_ROOT="${1:-/home/xfy/demos/PCRAR_model/final 1.8k}"
 START_RULE="${2:-Progression}"
@@ -123,7 +123,7 @@ print(f"All done. Output root: {ROOT}")
 PY
 
 echo "Quick count check:"
-for r in Progression Cycle Count Conservation Permutation Symmetry; do
+for r in Progression "Distribute-three" Count Conservation Permutation Symmetry; do
   c="$(find "${OUTPUT_ROOT}/${r}" -maxdepth 1 -type d -name 'sample_*' | wc -l)"
   echo "${r}: ${c}"
 done

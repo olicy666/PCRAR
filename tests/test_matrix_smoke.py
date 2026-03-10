@@ -25,7 +25,7 @@ def _load_entries(dataset_dir: Path) -> List[Dict[str, Any]]:
 
 def _to_rule_params(d: Dict[str, Any]) -> RuleParams:
     data = dict(d)
-    data["template"] = RuleTemplate(data["template"])
+    data["template"] = RuleTemplate.from_any(data["template"])
     return RuleParams(**data)
 
 
@@ -67,11 +67,11 @@ def _build_context(
 
 
 def validate_entry(entry: Dict[str, Any]) -> None:
-    rule = get_rule(RuleTemplate(entry["rule_template"]))
+    rule = get_rule(RuleTemplate.from_any(entry["rule_template"]))
     params = _to_rule_params(entry["rule_params"])
     params_v_raw = entry.get("rule_params_vertical")
     params_v = _to_rule_params(params_v_raw) if params_v_raw else params
-    rule_v = get_rule(RuleTemplate(entry["rule_template"])) if params_v_raw else rule
+    rule_v = get_rule(RuleTemplate.from_any(entry["rule_template"])) if params_v_raw else rule
     dual_rule = bool(params_v_raw) and params_v.to_dict() != params.to_dict()
     is_cycle_color_task = rule.template == RuleTemplate.CYCLE and params.axis == CYCLE_AXIS_COLOR
     k_h = int(entry["k_h"])
@@ -170,7 +170,7 @@ def validate_entry(entry: Dict[str, Any]) -> None:
             continue
         matched = False
         for spec in alt_specs:
-            alt_rule = get_rule(RuleTemplate(spec["rule_template"]))
+            alt_rule = get_rule(RuleTemplate.from_any(spec["rule_template"]))
             alt_params = _to_rule_params(spec["rule_params"])
             if check_consistent_with_alt_relation(cand, grid_context, alt_rule, alt_params, k_h, k_v):
                 matched = True

@@ -1,6 +1,6 @@
 """PCRAR 规则模块.
 
-实现 7 条规则：Progression, Cycle, Copy, Count, Conservation, Permutation, Symmetry
+实现 7 条规则：Progression, Distribute-three, Copy, Count, Conservation, Permutation, Symmetry
 """
 from __future__ import annotations
 
@@ -36,11 +36,11 @@ SLOTS = [-1, 0, 1]
 # 对称规则密度步长（左右采样权重一增一减）
 SYMMETRY_DENSITY_WEIGHT_STEP = 0.1
 
-# 合并后的 Cycle 规则（Cycle + Copy）固定轴：密度/尺寸/形状/颜色，均为 3 档循环
-CYCLE_AXIS_DENSITY = "cycle_density_distribute3"
-CYCLE_AXIS_SIZE = "cycle_size_distribute3"
-CYCLE_AXIS_SHAPE = "cycle_shape_distribute3"
-CYCLE_AXIS_COLOR = "cycle_color_distribute3"
+# 合并后的 Distribute-three 规则（历史 Cycle + Copy）固定轴。
+CYCLE_AXIS_DENSITY = "distribute_three_density"
+CYCLE_AXIS_SIZE = "distribute_three_size"
+CYCLE_AXIS_SHAPE = "distribute_three_shape"
+CYCLE_AXIS_COLOR = "distribute_three_color"
 CYCLE_AXES = [
     CYCLE_AXIS_DENSITY,
     CYCLE_AXIS_SIZE,
@@ -66,12 +66,35 @@ CYCLE_DENSITY_INDICES: List[int] = _pick_density_triplet()
 class RuleTemplate(str, Enum):
     """规则模板枚举"""
     PROGRESSION = "Progression"
-    CYCLE = "Cycle"
+    CYCLE = "Distribute-three"
     COPY = "Copy"
     COUNT = "Count"
     CONSERVATION = "Conservation"
     PERMUTATION = "Permutation"
     SYMMETRY = "Symmetry"
+
+    @classmethod
+    def from_any(cls, value: Any) -> "RuleTemplate":
+        if isinstance(value, cls):
+            return value
+        text = normalize_rule_template_name(value)
+        return cls(text)
+
+
+LEGACY_CYCLE_TEMPLATE_NAMES = {
+    "Cycle",
+    "DistributeThree",
+    "Distribute_Three",
+    "distribute-three",
+    "distribute_three",
+}
+
+
+def normalize_rule_template_name(value: Any) -> str:
+    text = str(value).strip()
+    if text in LEGACY_CYCLE_TEMPLATE_NAMES:
+        return RuleTemplate.CYCLE.value
+    return text
 
 
 # 规则来源对齐
@@ -156,13 +179,21 @@ def _get_density_weights(entity: PCRAREntity, n_leaves: int) -> np.ndarray:
 
 
 def _normalize_cycle_axis(axis: Optional[str]) -> Optional[str]:
-    """兼容旧轴命名并归一到新的 Cycle distribute-three 轴。"""
+    """兼容旧轴命名并归一到新的 Distribute-three 轴。"""
     mapping = {
         None: None,
         "shape": CYCLE_AXIS_SHAPE,
         "density": CYCLE_AXIS_DENSITY,
         "size": CYCLE_AXIS_SIZE,
         "color": CYCLE_AXIS_COLOR,
+        "distribute_three_shape": CYCLE_AXIS_SHAPE,
+        "distribute_three_size": CYCLE_AXIS_SIZE,
+        "distribute_three_density": CYCLE_AXIS_DENSITY,
+        "distribute_three_color": CYCLE_AXIS_COLOR,
+        "cycle_shape_distribute3": CYCLE_AXIS_SHAPE,
+        "cycle_size_distribute3": CYCLE_AXIS_SIZE,
+        "cycle_density_distribute3": CYCLE_AXIS_DENSITY,
+        "cycle_color_distribute3": CYCLE_AXIS_COLOR,
         "copy_shape_cycle": CYCLE_AXIS_SHAPE,
         "copy_size_cycle": CYCLE_AXIS_SIZE,
         "copy_density_cycle": CYCLE_AXIS_DENSITY,
@@ -273,7 +304,7 @@ class ProgressionRule(PCRARRule):
 
 
 class CycleRule(PCRARRule):
-    """Rule2 Cycle（循环，合并 Copy）
+    """Rule2 Distribute-three（合并历史 Cycle + Copy）
 
     在 2-3 个几何体场景中，对单一属性执行 3 档循环：
     - density: 3 档点数密度循环
@@ -884,7 +915,7 @@ def sample_applicable_rule(
             if rule.can_apply(entity, params):
                 return rule, params
     
-    # 回退到 Cycle（总是可以应用）
+    # 回退到 Distribute-three（总是可以应用）
     rule = CycleRule()
     params = rule.sample_params(rng, entity)
     return rule, params

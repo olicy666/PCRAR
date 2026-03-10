@@ -30,8 +30,8 @@ BIG_VIEW_MAX_RENDER_POINTS_PER_CLOUD = 3200
 # 规则名称映射
 RULE_NAMES = {
     RuleTemplate.PROGRESSION: "递进规则",
-    RuleTemplate.CYCLE: "循环规则",
-    RuleTemplate.COPY: "循环规则",
+    RuleTemplate.CYCLE: "Distribute-three规则",
+    RuleTemplate.COPY: "Distribute-three规则",
     RuleTemplate.COUNT: "增减规则",
     RuleTemplate.CONSERVATION: "守恒规则",
     RuleTemplate.PERMUTATION: "置换规则",
@@ -40,8 +40,8 @@ RULE_NAMES = {
 
 RULE_SHORT_NAMES = {
     RuleTemplate.PROGRESSION: "递进",
-    RuleTemplate.CYCLE: "循环",
-    RuleTemplate.COPY: "循环",
+    RuleTemplate.CYCLE: "Distribute-three",
+    RuleTemplate.COPY: "Distribute-three",
     RuleTemplate.COUNT: "增减",
     RuleTemplate.CONSERVATION: "守恒",
     RuleTemplate.PERMUTATION: "置换",
@@ -67,7 +67,7 @@ PERTURBATION_LABELS = {
     "outlier": "离群点替换",
 }
 
-# Streamlit 端展示的规则集合：Copy 已并入 Cycle，不再单独出题。
+# Streamlit 端展示的规则集合：Copy 已并入 Distribute-three，不再单独出题。
 MODE_RULE_TEMPLATES: List[RuleTemplate] = [
     RuleTemplate.PROGRESSION,
     RuleTemplate.CYCLE,
@@ -79,7 +79,7 @@ MODE_RULE_TEMPLATES: List[RuleTemplate] = [
 
 
 def canonical_template(template: RuleTemplate) -> RuleTemplate:
-    """规则模板规范化（兼容历史 Copy->Cycle）。"""
+    """规则模板规范化（兼容历史 Copy->Distribute-three）。"""
     return RuleTemplate.CYCLE if template == RuleTemplate.COPY else template
 
 # 题型名称（固定为 matrix）
@@ -133,9 +133,9 @@ def mode_display_name(mode: str) -> str:
 
 
 def normalize_template_value(template_name: str, default: RuleTemplate) -> str:
-    """把 meta 中的规则名标准化为当前语义（Copy 归并到 Cycle）。"""
+    """把 meta 中的规则名标准化为当前语义（Copy 归并到 Distribute-three）。"""
     try:
-        tpl = RuleTemplate(template_name)
+        tpl = RuleTemplate.from_any(template_name)
     except Exception:
         tpl = default
     return canonical_template(tpl).value
@@ -153,6 +153,10 @@ def axis_to_attribute(axis: Optional[str]) -> Optional[str]:
         "count": "count",
         "size_conservation": "size",
         "slot_permutation": "position",
+        "distribute_three_shape": "shape",
+        "distribute_three_size": "size",
+        "distribute_three_density": "density",
+        "distribute_three_color": "color",
         "cycle_shape_distribute3": "shape",
         "cycle_size_distribute3": "size",
         "cycle_density_distribute3": "density",
@@ -661,6 +665,7 @@ def reset_exam_state() -> None:
         st.session_state.pop(f"big_view_{label}", None)
     for idx in range(TOTAL_QUESTIONS):
         st.session_state.pop(f"answer_{idx}", None)
+        st.session_state.pop(f"merge_candidate_choice_{idx}", None)
         for label in ["A", "B", "C", "D"]:
             st.session_state.pop(f"merge_candidate_{idx}_{label}", None)
 
@@ -1046,7 +1051,7 @@ def render_exam() -> None:
         st.subheader("规则说明")
         rule_desc = {
             "递进规则 (Progression)": "属性沿固定步长变化：尺寸/姿态/位置的递进",
-            "循环规则 (Cycle)": "固定 3 档循环：密度 / 尺寸 / 形状 / 颜色（同一行/列三格各出现一次）",
+            "Distribute-three规则 (Distribute-three)": "固定 3 档分布：密度 / 尺寸 / 形状 / 颜色（同一行/列三格各出现一次）",
             "增减规则 (Count)": "叶节点数量变化：2↔3",
             "守恒规则 (Conservation)": "尺寸守恒：固定3个几何体联动（+1/-1/0）",
             "置换规则 (Permutation)": "位置槽位循环置换",
@@ -1092,13 +1097,11 @@ def render_exam() -> None:
         mime="application/json",
     )
     
-    control_cols = st.columns([1, 1, 6])
+    control_cols = st.columns([1, 7])
     with control_cols[0]:
         if st.button("重置当前题目视角"):
             st.session_state.viewer_reset_nonce += 1
             st.rerun()
-    with control_cols[1]:
-        st.caption("九宫格合并视图")
 
     grid_paths = entry.get("grid_paths", [])
     candidate_paths = entry.get("candidate_paths", [])
@@ -1122,19 +1125,21 @@ def render_exam() -> None:
         st.error("当前题目没有候选项。")
         return
 
-    selected_merge_candidate = None
-    merge_toggle_cols = st.columns(4)
-    enabled_candidates: List[str] = []
-    for i, label in enumerate(cand_labels):
-        with merge_toggle_cols[i]:
-            toggle_key = f"merge_candidate_{idx}_{label}"
-            if st.toggle(label, key=toggle_key):
-                enabled_candidates.append(label)
-
-    if len(enabled_candidates) == 1:
-        selected_merge_candidate = enabled_candidates[0]
-    elif len(enabled_candidates) > 1:
-        st.warning("当前同时开启了多个候选项；同一时刻只能并入 1 个，请仅保留一个开关。")
+    merge_options = ["不显示"] + cand_labels
+    merge_choice_key = f"merge_candidate_choice_{idx}"
+    current_merge_choice = st.session_state.get(merge_choice_key, "不显示")
+    if current_merge_choice not in merge_options:
+        current_merge_choice = "不显示"
+        st.session_state[merge_choice_key] = current_merge_choice
+    selected_merge_candidate = st.radio(
+        "打开第九格",
+        merge_options,
+        index=merge_options.index(current_merge_choice),
+        key=merge_choice_key,
+        horizontal=True,
+    )
+    if selected_merge_candidate == "不显示":
+        selected_merge_candidate = None
 
     # 构建九宫格合并视图：仅展示已知格，缺失格保持空白
     spacing = BIG_VIEW_GRID_SPACING
@@ -1176,13 +1181,17 @@ def render_exam() -> None:
                 f"当前合并视图已将选项 {selected_merge_candidate} 放到缺失格位置 {tuple(map(int, target_pos))}。"
             )
 
-    pl_multi_component(
-        contents,
-        labels,
-        offsets=offsets,
-        height=BIG_PLY_HEIGHT,
-        reset_nonce=reset_nonce,
-    )
+    merge_view_cols = st.columns([5, 2])
+    with merge_view_cols[0]:
+        pl_multi_component(
+            contents,
+            labels,
+            offsets=offsets,
+            height=BIG_PLY_HEIGHT,
+            reset_nonce=reset_nonce,
+        )
+    with merge_view_cols[1]:
+        st.markdown("**（在页面最下方选择答案！）**")
 
     st.markdown("### 4个选项点云")
     cand_cols = st.columns(4)

@@ -10,7 +10,7 @@ set -euo pipefail
 #   bash build_hard_from_easy_vlm.sh /home/xfy/demos/PCRAR_model/final_vlm
 #
 # Optional:
-#   RULES_CSV="Cycle,Count" bash build_hard_from_easy_vlm.sh
+#   RULES_CSV="Distribute-three,Count" bash build_hard_from_easy_vlm.sh
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"

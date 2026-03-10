@@ -8,7 +8,7 @@ set -euo pipefail
 # Output layout:
 #   final_vlm/
 #     Progression/{easy,hard}/sample_*/
-#     Cycle/{easy,hard}/sample_*/
+#     Distribute-three/{easy,hard}/sample_*/
 #     Count/{easy,hard}/sample_*/
 #     Conservation/{easy,hard}/sample_*/
 #     Permutation/{easy,hard}/sample_*/
@@ -127,7 +127,7 @@ print(f"All done. Output root: {ROOT}")
 PY
 
 echo "Quick count check:"
-for r in Progression Cycle Count Conservation Permutation Symmetry; do
+for r in Progression "Distribute-three" Count Conservation Permutation Symmetry; do
   for d in easy hard; do
     c="$(find "${OUTPUT_ROOT}/${r}/${d}" -maxdepth 1 -type d -name 'sample_*' | wc -l)"
     echo "${r}/${d}: ${c}"

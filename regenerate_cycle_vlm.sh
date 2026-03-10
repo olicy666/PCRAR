@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Regenerate only Cycle rule for final_vlm (easy + hard), then keep only:
+# Regenerate only Distribute-three rule for final_vlm (easy + hard), then keep only:
 # - view_combined.png
 # - meta.json
 #
@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 FINAL_VLM_ROOT="${1:-/home/xfy/demos/PCRAR_model/final_vlm}"
-CYCLE_ROOT="${FINAL_VLM_ROOT%/}/Cycle"
+CYCLE_ROOT="${FINAL_VLM_ROOT%/}/Distribute-three"
 
 python - "$CYCLE_ROOT" <<'PY'
 import json
@@ -64,7 +64,7 @@ for difficulty_name, missing_one_per_row in DIFFICULTIES:
             tries += 1
             if tries > MAX_TRIES_PER_SEED:
                 raise RuntimeError(
-                    f"Cycle/{difficulty_name} seed={seed} generation failed: "
+                    f"Distribute-three/{difficulty_name} seed={seed} generation failed: "
                     f"made={made}/{PER_SEED}, retries exceeded ({MAX_TRIES_PER_SEED})"
                 )
             try:
@@ -80,22 +80,22 @@ for difficulty_name, missing_one_per_row in DIFFICULTIES:
             sample_idx += 1
             made += 1
 
-        print(f"Cycle/{difficulty_name}: seed={seed} -> {made}")
+        print(f"Distribute-three/{difficulty_name}: seed={seed} -> {made}")
 
     with meta_path.open("w", encoding="utf-8") as f:
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
-    print(f"[DONE] Cycle/{difficulty_name}: {sample_idx}, dir={diff_dir}")
+    print(f"[DONE] Distribute-three/{difficulty_name}: {sample_idx}, dir={diff_dir}")
 PY
 
-# Keep only view_combined.png and meta.json under Cycle.
+# Keep only view_combined.png and meta.json under Distribute-three.
 find "$CYCLE_ROOT" -type f ! \( -name 'view_combined.png' -o -name 'meta.json' \) -delete
 
 echo "Quick count check:"
 for d in easy hard; do
   c="$(find "${CYCLE_ROOT}/${d}" -maxdepth 1 -type d -name 'sample_*' | wc -l)"
   bad="$(find "${CYCLE_ROOT}/${d}" -type f ! \( -name 'view_combined.png' -o -name 'meta.json' \) | wc -l)"
-  echo "Cycle/${d}: samples=${c}, non_target_files=${bad}"
+  echo "Distribute-three/${d}: samples=${c}, non_target_files=${bad}"
 done
 
 echo "Done: ${CYCLE_ROOT}"

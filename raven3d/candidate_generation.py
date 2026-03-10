@@ -53,6 +53,33 @@ def _neighbor_index(idx: int, n: int, direction: int = 1) -> int:
     return nxt
 
 
+def _nearest_level_index(level: Any, choices: Sequence[Any]) -> int:
+    if not choices:
+        raise ValueError("choices cannot be empty")
+    if level in choices:
+        return choices.index(level)
+
+    enum_type = type(level)
+    try:
+        all_levels = list(enum_type)
+        level_pos = all_levels.index(level)
+    except Exception:
+        return len(choices) // 2
+
+    choice_positions = []
+    for choice in choices:
+        try:
+            choice_positions.append(all_levels.index(choice))
+        except ValueError:
+            choice_positions.append(len(all_levels))
+
+    best_idx = min(
+        range(len(choices)),
+        key=lambda idx: (abs(choice_positions[idx] - level_pos), choice_positions[idx], idx),
+    )
+    return int(best_idx)
+
+
 def _perturb_from_gt(
     gt: PCRAREntity,
     level_cfg: MatrixLevelConfig,
@@ -65,14 +92,14 @@ def _perturb_from_gt(
     for method in methods:
         if method == "size" and leaves:
             idx = int(rng.integers(len(leaves)))
-            cur = level_cfg.size_levels.index(leaves[idx].size_level)
+            cur = _nearest_level_index(leaves[idx].size_level, level_cfg.size_levels)
             nxt = _neighbor_index(cur, len(level_cfg.size_levels), int(rng.choice([-1, 1])))
             if nxt != cur:
                 leaves[idx].size_level = level_cfg.size_levels[nxt]
                 return out
         elif method == "delta" and leaves:
             idx = int(rng.integers(len(leaves)))
-            cur = level_cfg.delta_levels.index(leaves[idx].delta_level)
+            cur = _nearest_level_index(leaves[idx].delta_level, level_cfg.delta_levels)
             nxt = _neighbor_index(cur, len(level_cfg.delta_levels), int(rng.choice([-1, 1])))
             if nxt != cur:
                 leaves[idx].delta_level = level_cfg.delta_levels[nxt]
@@ -321,7 +348,7 @@ def _sample_alt_rule_candidate(
 
 
 def _parse_alt_spec(spec: Dict[str, Any]) -> Tuple[PCRARRule, RuleParams]:
-    template = RuleTemplate(spec["rule_template"])
+    template = RuleTemplate.from_any(spec["rule_template"])
     params_dict = dict(spec["rule_params"])
     params_dict["template"] = template
     return get_rule(template), RuleParams(**params_dict)

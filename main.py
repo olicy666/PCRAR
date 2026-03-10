@@ -71,7 +71,7 @@ def parse_args() -> argparse.Namespace:
         "--pcrar-rules",
         type=str,
         default=None,
-        help="PCRAR rule templates, comma-separated (e.g., Progression,Cycle)",
+        help="PCRAR rule templates, comma-separated (e.g., Progression,Distribute-three)",
     )
 
     return parser.parse_args()
@@ -85,7 +85,7 @@ def _parse_rule_filter(raw: Optional[str]):
     rule_filter: Set[RuleTemplate] = set()
     for name in [x.strip() for x in raw.split(",") if x.strip()]:
         try:
-            rule_filter.add(RuleTemplate(name))
+            rule_filter.add(RuleTemplate.from_any(name))
         except ValueError as exc:
             valid = ", ".join(t.value for t in RuleTemplate)
             raise SystemExit(f"Invalid PCRAR rule '{name}'. Valid rules: {valid}") from exc

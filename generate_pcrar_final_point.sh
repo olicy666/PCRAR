@@ -14,7 +14,7 @@ set -euo pipefail
 #   <OUTPUT_ROOT>/hard/meta.json
 #
 # Generation plan:
-# - rules: Progression, Cycle, Count, Conservation, Permutation, Symmetry
+# - rules: Progression, Distribute-three, Count, Conservation, Permutation, Symmetry
 # - seeds: 1..30
 # - per seed per rule: 10 samples
 # - total per rule per split: 300
@@ -131,7 +131,7 @@ PY
 echo "Quick count check:"
 for split in easy hard; do
   echo "--- ${split} ---"
-  for r in Progression Cycle Count Conservation Permutation Symmetry; do
+  for r in Progression "Distribute-three" Count Conservation Permutation Symmetry; do
     c="$(find "${OUTPUT_ROOT}/${split}/${r}" -maxdepth 1 -type d -name 'sample_*' | wc -l)"
     echo "${r}: ${c}"
   done

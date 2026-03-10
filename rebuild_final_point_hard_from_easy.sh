@@ -10,7 +10,7 @@ set -euo pipefail
 #   bash rebuild_final_point_hard_from_easy.sh /home/xfy/demos/PCRAR_model/final_point
 #
 # Optional:
-#   RULES_CSV="Cycle,Count" bash rebuild_final_point_hard_from_easy.sh
+#   RULES_CSV="Distribute-three,Count" bash rebuild_final_point_hard_from_easy.sh
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"

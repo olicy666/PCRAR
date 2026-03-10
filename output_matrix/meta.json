@@ -2,7 +2,7 @@
   {
     "id": "sample_000000",
     "task_type": "matrix_3x3",
-    "focus": "3x3 matrix completion using one fixed rule instance T (template=Cycle, axis=shape). Per-T attribute change: primitive_type cycles over Sphere->Box->Cylinder->Cone on leaf0:+1, leaf1:+1. Horizontal relation E[r,c+1]=T^2(E[r,c]); vertical relation E[r+1,c]=T^1(E[r,c]). Effective stride detail: horizontal applies T^2 cycle steps; vertical applies T^1 cycle steps.",
+    "focus": "3x3 matrix completion using one fixed rule instance T (template=Distribute-three, axis=shape). Per-T attribute change: primitive_type cycles over Sphere->Box->Cylinder->Cone on leaf0:+1, leaf1:+1. Horizontal relation E[r,c+1]=T^2(E[r,c]); vertical relation E[r+1,c]=T^1(E[r,c]). Effective stride detail: horizontal applies T^2 Distribute-three steps; vertical applies T^1 Distribute-three steps.",
     "target_position": [
       2,
       2
@@ -83,9 +83,9 @@
       "gt",
       "irrelevant"
     ],
-    "rule_template": "Cycle",
+    "rule_template": "Distribute-three",
     "rule_params": {
-      "template": "Cycle",
+      "template": "Distribute-three",
       "axis": "shape",
       "leaf_idx": 0,
       "leaf_indices": [
@@ -101,7 +101,7 @@
       "source_indices": null
     },
     "rule_params_vertical": {
-      "template": "Cycle",
+      "template": "Distribute-three",
       "axis": "shape",
       "leaf_idx": 0,
       "leaf_indices": [
@@ -119,14 +119,14 @@
     "matrix_relation": {
       "formula": "E[r,c] = T^(r*k_v + c*k_h)(E[0,0])",
       "rule_instance": {
-        "template": "Cycle",
+        "template": "Distribute-three",
         "axis": "shape",
         "changed_attribute": "primitive_type",
-        "description": "Cycle over primitive types on leaves=[0, 1]",
+        "description": "Distribute-three over primitive types on leaves=[0, 1]",
         "direction": 1
       },
       "attribute_change_detail": {
-        "template": "Cycle",
+        "template": "Distribute-three",
         "axis": "shape",
         "per_T_change": {
           "attribute": "primitive_type",
@@ -150,13 +150,13 @@
         "step_power": 2,
         "formula": "E[r,c+1] = T^2(E[r,c])",
         "changed_attribute": "primitive_type",
-        "description": "Cycle over primitive types on leaves=[0, 1]"
+        "description": "Distribute-three over primitive types on leaves=[0, 1]"
       },
       "vertical_relation": {
         "step_power": 1,
         "formula": "E[r+1,c] = T^1(E[r,c])",
         "changed_attribute": "primitive_type",
-        "description": "Cycle over primitive types on leaves=[0, 1]"
+        "description": "Distribute-three over primitive types on leaves=[0, 1]"
       }
     },
     "k_h": 2,
@@ -227,13 +227,13 @@
       }
     },
     "rule": {
-      "template": "Cycle",
+      "template": "Distribute-three",
       "source_align": [
         "R1-6",
         "R3-10"
       ],
       "params": {
-        "template": "Cycle",
+        "template": "Distribute-three",
         "axis": "shape",
         "leaf_idx": 0,
         "leaf_indices": [
@@ -248,9 +248,9 @@
         "rot_axis": null,
         "source_indices": null
       },
-      "vertical_template": "Cycle",
+      "vertical_template": "Distribute-three",
       "vertical_params": {
-        "template": "Cycle",
+        "template": "Distribute-three",
         "axis": "shape",
         "leaf_idx": 0,
         "leaf_indices": [
@@ -1982,7 +1982,7 @@
   {
     "id": "sample_000002",
     "task_type": "matrix_3x3",
-    "focus": "3x3 matrix completion using one fixed rule instance T (template=Cycle, axis=shape). Per-T attribute change: primitive_type cycles over Sphere->Box->Cylinder->Cone on leaf0:-1, leaf1:+1. Horizontal relation E[r,c+1]=T^1(E[r,c]); vertical relation E[r+1,c]=T^2(E[r,c]). Effective stride detail: horizontal applies T^1 cycle steps; vertical applies T^2 cycle steps.",
+    "focus": "3x3 matrix completion using one fixed rule instance T (template=Distribute-three, axis=shape). Per-T attribute change: primitive_type cycles over Sphere->Box->Cylinder->Cone on leaf0:-1, leaf1:+1. Horizontal relation E[r,c+1]=T^1(E[r,c]); vertical relation E[r+1,c]=T^2(E[r,c]). Effective stride detail: horizontal applies T^1 Distribute-three steps; vertical applies T^2 Distribute-three steps.",
     "target_position": [
       2,
       2
@@ -2063,9 +2063,9 @@
       "gt",
       "irrelevant"
     ],
-    "rule_template": "Cycle",
+    "rule_template": "Distribute-three",
     "rule_params": {
-      "template": "Cycle",
+      "template": "Distribute-three",
       "axis": "shape",
       "leaf_idx": 0,
       "leaf_indices": [
@@ -2081,7 +2081,7 @@
       "source_indices": null
     },
     "rule_params_vertical": {
-      "template": "Cycle",
+      "template": "Distribute-three",
       "axis": "shape",
       "leaf_idx": 0,
       "leaf_indices": [
@@ -2099,14 +2099,14 @@
     "matrix_relation": {
       "formula": "E[r,c] = T^(r*k_v + c*k_h)(E[0,0])",
       "rule_instance": {
-        "template": "Cycle",
+        "template": "Distribute-three",
         "axis": "shape",
         "changed_attribute": "primitive_type",
-        "description": "Cycle over primitive types on leaves=[0, 1]",
+        "description": "Distribute-three over primitive types on leaves=[0, 1]",
         "direction": -1
       },
       "attribute_change_detail": {
-        "template": "Cycle",
+        "template": "Distribute-three",
         "axis": "shape",
         "per_T_change": {
           "attribute": "primitive_type",
@@ -2130,13 +2130,13 @@
         "step_power": 1,
         "formula": "E[r,c+1] = T^1(E[r,c])",
         "changed_attribute": "primitive_type",
-        "description": "Cycle over primitive types on leaves=[0, 1]"
+        "description": "Distribute-three over primitive types on leaves=[0, 1]"
       },
       "vertical_relation": {
         "step_power": 2,
         "formula": "E[r+1,c] = T^2(E[r,c])",
         "changed_attribute": "primitive_type",
-        "description": "Cycle over primitive types on leaves=[0, 1]"
+        "description": "Distribute-three over primitive types on leaves=[0, 1]"
       }
     },
     "k_h": 1,
@@ -2207,13 +2207,13 @@
       }
     },
     "rule": {
-      "template": "Cycle",
+      "template": "Distribute-three",
       "source_align": [
         "R1-6",
         "R3-10"
       ],
       "params": {
-        "template": "Cycle",
+        "template": "Distribute-three",
         "axis": "shape",
         "leaf_idx": 0,
         "leaf_indices": [
@@ -2228,9 +2228,9 @@
         "rot_axis": null,
         "source_indices": null
       },
-      "vertical_template": "Cycle",
+      "vertical_template": "Distribute-three",
       "vertical_params": {
-        "template": "Cycle",
+        "template": "Distribute-three",
         "axis": "shape",
         "leaf_idx": 0,
         "leaf_indices": [
@@ -2904,9 +2904,9 @@
       ],
       "alt_relations": [
         {
-          "rule_template": "Cycle",
+          "rule_template": "Distribute-three",
           "rule_params": {
-            "template": "Cycle",
+            "template": "Distribute-three",
             "axis": "shape",
             "leaf_idx": 1,
             "leaf_indices": [

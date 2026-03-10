@@ -39,6 +39,7 @@ from .pcrar_rules import (
     RULE_SOURCE_ALIGN,
     SYMMETRY_DENSITY_WEIGHT_STEP,
     get_rule,
+    normalize_rule_template_name,
 )
 
 
@@ -170,12 +171,13 @@ class PCRARDatasetGenerator:
         if self.config.rule_filter:
             normalized = {self._normalize_template_name(t) for t in self.config.rule_filter}
             return list(normalized)
-        # 合并 Cycle + Copy 后，矩阵主路径默认不再单独采样 Copy。
+        # 合并 Distribute-three + Copy 后，矩阵主路径默认不再单独采样 Copy。
         return [t for t in RuleTemplate if t != RuleTemplate.COPY]
 
     @staticmethod
     def _normalize_template_name(template: RuleTemplate) -> RuleTemplate:
-        return RuleTemplate.CYCLE if template == RuleTemplate.COPY else template
+        parsed = RuleTemplate.from_any(normalize_rule_template_name(template))
+        return RuleTemplate.CYCLE if parsed == RuleTemplate.COPY else parsed
 
     @staticmethod
     def _normalize_cycle_axis_name(axis: Optional[str]) -> Optional[str]:
@@ -186,6 +188,14 @@ class PCRARDatasetGenerator:
             "density": CYCLE_AXIS_DENSITY,
             "size": CYCLE_AXIS_SIZE,
             "color": CYCLE_AXIS_COLOR,
+            "distribute_three_shape": CYCLE_AXIS_SHAPE,
+            "distribute_three_size": CYCLE_AXIS_SIZE,
+            "distribute_three_density": CYCLE_AXIS_DENSITY,
+            "distribute_three_color": CYCLE_AXIS_COLOR,
+            "cycle_shape_distribute3": CYCLE_AXIS_SHAPE,
+            "cycle_size_distribute3": CYCLE_AXIS_SIZE,
+            "cycle_density_distribute3": CYCLE_AXIS_DENSITY,
+            "cycle_color_distribute3": CYCLE_AXIS_COLOR,
             "copy_shape_cycle": CYCLE_AXIS_SHAPE,
             "copy_size_cycle": CYCLE_AXIS_SIZE,
             "copy_density_cycle": CYCLE_AXIS_DENSITY,
@@ -224,7 +234,7 @@ class PCRARDatasetGenerator:
         enforce_leaf_separation(leaves)
 
     def _enforce_copy_preconditions(self, entity: PCRAREntity, preferred_axis: Optional[str] = None) -> None:
-        """兼容接口：Copy 轴映射为合并后的 Cycle 轴。"""
+        """兼容接口：Copy 轴映射为合并后的 Distribute-three 轴。"""
         self._enforce_cycle_preconditions(entity, preferred_axis=preferred_axis)
 
     def _enforce_symmetry_preconditions(self, entity: PCRAREntity, preferred_axis: Optional[str] = None) -> None:
@@ -642,9 +652,9 @@ class PCRARDatasetGenerator:
                 CYCLE_AXIS_SHAPE: "primitive_type",
                 CYCLE_AXIS_COLOR: "color",
             }
-            summary["changed_attribute"] = cycle_attr_map.get(axis, "cycle_distribute3_axis")
+            summary["changed_attribute"] = cycle_attr_map.get(axis, "distribute_three_axis")
             summary["description"] = (
-                f"Cycle distribute-three on {summary['changed_attribute']} (direction={int(params.direction)})"
+                f"Distribute-three on {summary['changed_attribute']} (direction={int(params.direction)})"
             )
         elif template == RuleTemplate.COPY:
             summary["changed_attribute"] = axis or "copy_pattern"
@@ -837,20 +847,20 @@ class PCRARDatasetGenerator:
             cycle_dir = "forward" if direction >= 0 else "reverse"
             if axis == CYCLE_AXIS_DENSITY:
                 triplet = " -> ".join(str(int(x)) for x in CYCLE_DENSITY_INDICES)
-                per_t = f"density level cycles in distribute-three order ({triplet}), {cycle_dir}"
+                per_t = f"density level follows Distribute-three order ({triplet}), {cycle_dir}"
             elif axis == CYCLE_AXIS_SIZE:
                 triplet = " -> ".join(x.value for x in CYCLE_SIZE_LEVELS)
-                per_t = f"all leaves share one size level and cycle in distribute-three order ({triplet}), {cycle_dir}"
+                per_t = f"all leaves share one size level and follow Distribute-three order ({triplet}), {cycle_dir}"
             elif axis == CYCLE_AXIS_SHAPE:
                 triplet = " -> ".join(x.value for x in CYCLE_SHAPE_LEVELS)
-                per_t = f"all leaves share one primitive type and cycle in distribute-three order ({triplet}), {cycle_dir}"
+                per_t = f"all leaves share one primitive type and follow Distribute-three order ({triplet}), {cycle_dir}"
             elif axis == CYCLE_AXIS_COLOR:
-                per_t = "entity color cycles in distribute-three order (red -> green -> blue), " + cycle_dir
+                per_t = "entity color follows Distribute-three order (red -> green -> blue), " + cycle_dir
             else:
-                per_t = f"cycle distribute-three on axis {axis}, {cycle_dir}"
+                per_t = f"Distribute-three on axis {axis}, {cycle_dir}"
             stride = (
-                f"horizontal applies T^{int(k_h)} cycle steps; "
-                f"vertical applies T^{int(k_v)} cycle steps"
+                f"horizontal applies T^{int(k_h)} Distribute-three steps; "
+                f"vertical applies T^{int(k_v)} Distribute-three steps"
             )
         elif template == RuleTemplate.COPY:
             direction = int(params.direction)
