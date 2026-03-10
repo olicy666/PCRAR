@@ -1191,7 +1191,10 @@ def render_exam() -> None:
             reset_nonce=reset_nonce,
         )
     with merge_view_cols[1]:
-        st.markdown("**（在页面最下方选择答案！）**")
+        st.markdown(
+            "<p style='color: #d32f2f; font-weight: 700;'>（在页面最下方选择答案！）</p>",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("### 4个选项点云")
     cand_cols = st.columns(4)
