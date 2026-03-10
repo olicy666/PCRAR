@@ -520,6 +520,11 @@ class CountRule(PCRARRule):
     """
     template = RuleTemplate.COUNT
     source_align = RULE_SOURCE_ALIGN[RuleTemplate.COUNT]
+    _VISIBLE_COUNT_LAYOUTS: Dict[int, List[Tuple[int, DeltaLevel]]] = {
+        1: [(0, DeltaLevel.MID)],
+        2: [(-1, DeltaLevel.VFAR), (1, DeltaLevel.VFAR)],
+        3: [(-2, DeltaLevel.VFAR), (0, DeltaLevel.MID), (2, DeltaLevel.VFAR)],
+    }
     
     def sample_params(self, rng: np.random.Generator, entity: PCRAREntity) -> RuleParams:
         leaf_count = entity.leaf_count()
@@ -568,6 +573,7 @@ class CountRule(PCRARRule):
         # 截断叶节点
         leaves = leaves[:target_count]
 
+        self._arrange_leaves_for_visibility(leaves)
         enforce_leaf_separation(leaves)
 
         if target_count == 1:
@@ -583,6 +589,17 @@ class CountRule(PCRARRule):
         from .pcrar_entity import density_point_count
         new_obs.n_points = density_point_count(new_obs.density_preset_idx)
         return PCRAREntity(csg=new_csg, obs=new_obs)
+
+    def _arrange_leaves_for_visibility(self, leaves: List[Leaf]) -> None:
+        """Count 规则按固定布局摆放，保证 1/2/3 个 leaf 视觉上明显分开。"""
+        layout = self._VISIBLE_COUNT_LAYOUTS.get(len(leaves))
+        if not layout:
+            return
+
+        ordered_leaves = sorted(leaves, key=lambda leaf: (leaf.slot, leaf.id))
+        for leaf, (slot, delta_level) in zip(ordered_leaves, layout):
+            leaf.slot = slot
+            leaf.delta_level = delta_level
     
     def check(self, entity_a: PCRAREntity, entity_b: PCRAREntity, params: RuleParams) -> bool:
         # 检查叶节点数量变化
