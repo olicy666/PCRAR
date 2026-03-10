@@ -39,7 +39,6 @@ from .pcrar_rules import (
     RULE_SOURCE_ALIGN,
     SYMMETRY_DENSITY_WEIGHT_STEP,
     get_rule,
-    normalize_rule_template_name,
 )
 
 
@@ -176,7 +175,7 @@ class PCRARDatasetGenerator:
 
     @staticmethod
     def _normalize_template_name(template: RuleTemplate) -> RuleTemplate:
-        parsed = RuleTemplate.from_any(normalize_rule_template_name(template))
+        parsed = RuleTemplate.from_any(template)
         return RuleTemplate.CYCLE if parsed == RuleTemplate.COPY else parsed
 
     @staticmethod
