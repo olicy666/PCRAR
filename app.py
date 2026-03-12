@@ -5,6 +5,7 @@ import json
 import tempfile
 from datetime import datetime
 from collections import Counter
+from html import escape
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -20,6 +21,7 @@ RESULTS_DIR = Path("results")
 TOTAL_QUESTIONS = 10
 PLY_HEIGHT = 320
 BIG_PLY_HEIGHT = 720
+OPTION_PLY_HEIGHT = 210
 POINTS_PER_CLOUD = 8192
 BIG_VIEW_POINT_SIZE_SCALE = 6.0
 BIG_VIEW_GRID_SPACING = 4.2
@@ -239,6 +241,226 @@ DIFFICULTY_LABELS = {
     "easy": "简单（Easy）",
 }
 RECORD_COLUMNS = ["username", "mode", "score", "total", "accuracy", "reason"]
+
+
+def render_theme_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background:
+                radial-gradient(circle at top left, rgba(245, 158, 11, 0.16), transparent 28%),
+                radial-gradient(circle at top right, rgba(14, 165, 233, 0.14), transparent 26%),
+                linear-gradient(180deg, #f8fafc 0%, #edf4f7 100%);
+        }
+        html, body, [class*="css"]  {
+            font-family: "Trebuchet MS", "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+        }
+        .main .block-container {
+            max-width: 1500px;
+            padding-top: 1.5rem;
+            padding-bottom: 2.5rem;
+        }
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #10263d 0%, #173d61 100%);
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        [data-testid="stSidebar"] * {
+            color: #ecf5ff;
+        }
+        [data-testid="stSidebar"] .stCaption {
+            color: #d3e7f9;
+        }
+        div[data-testid="stForm"] {
+            background: rgba(255, 255, 255, 0.86);
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 24px;
+            padding: 1.15rem 1rem 0.55rem;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+            backdrop-filter: blur(8px);
+        }
+        div[data-testid="stMetric"] {
+            background: rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 18px;
+            padding: 0.35rem 0.6rem;
+        }
+        div[data-testid="stButton"] > button,
+        div[data-testid="stDownloadButton"] > button,
+        div[data-testid="stFormSubmitButton"] > button {
+            width: 100%;
+            min-height: 2.85rem;
+            border-radius: 999px;
+            border: none;
+            background: linear-gradient(135deg, #0f4c81 0%, #1f87c9 100%);
+            color: #ffffff;
+            font-weight: 700;
+            box-shadow: 0 12px 24px rgba(15, 76, 129, 0.18);
+        }
+        div[data-testid="stButton"] > button:hover,
+        div[data-testid="stDownloadButton"] > button:hover,
+        div[data-testid="stFormSubmitButton"] > button:hover {
+            background: linear-gradient(135deg, #0c406b 0%, #176ea7 100%);
+        }
+        div[data-testid="stTextInput"] input,
+        div[data-testid="stNumberInput"] input,
+        div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        div[data-testid="stMultiSelect"] div[data-baseweb="select"] > div {
+            border-radius: 16px !important;
+            border: 1px solid rgba(15, 23, 42, 0.12) !important;
+            background: rgba(255, 255, 255, 0.9) !important;
+        }
+        [data-testid="stSidebar"] div[data-testid="stTextInput"] input,
+        [data-testid="stSidebar"] div[data-testid="stNumberInput"] input,
+        [data-testid="stSidebar"] div[data-baseweb="select"] *,
+        [data-testid="stSidebar"] div[data-testid="stMultiSelect"] div[data-baseweb="select"] * {
+            color: #0f172a !important;
+        }
+        div[role="radiogroup"] {
+            gap: 0.45rem;
+        }
+        div[role="radiogroup"] label {
+            background: rgba(255, 255, 255, 0.78);
+            border: 1px solid rgba(15, 23, 42, 0.1);
+            border-radius: 999px;
+            padding: 0.3rem 0.85rem;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+        }
+        div[data-testid="stAlert"] {
+            border-radius: 20px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+        }
+        div[data-testid="stDataFrame"] {
+            background: rgba(255, 255, 255, 0.74);
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 22px;
+            overflow: hidden;
+        }
+        div[data-testid="stCheckbox"] label > div:first-child {
+            transform: scale(1.28);
+            transform-origin: left center;
+        }
+        div[data-testid="stCheckbox"] label {
+            align-items: center;
+        }
+        .app-hero {
+            padding: 1.35rem 1.5rem;
+            border-radius: 28px;
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.88) 0%, rgba(237, 246, 255, 0.96) 55%, rgba(255, 248, 235, 0.92) 100%);
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            box-shadow: 0 24px 50px rgba(15, 23, 42, 0.07);
+            margin-bottom: 1rem;
+        }
+        .app-hero-eyebrow {
+            font-size: 0.8rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #b45309;
+            font-weight: 700;
+            margin-bottom: 0.35rem;
+        }
+        .app-hero h1 {
+            margin: 0;
+            font-size: 2.1rem;
+            line-height: 1.1;
+            color: #0f172a;
+        }
+        .app-hero p {
+            margin: 0.6rem 0 0;
+            font-size: 1rem;
+            line-height: 1.6;
+            color: #334155;
+        }
+        .app-hero-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.95rem;
+        }
+        .meta-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.34rem 0.8rem;
+            border-radius: 999px;
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: #0f4c81;
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(15, 76, 129, 0.12);
+        }
+        .section-panel {
+            background: rgba(255, 255, 255, 0.82);
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 22px;
+            padding: 1rem 1.1rem;
+            box-shadow: 0 16px 36px rgba(15, 23, 42, 0.05);
+            margin-bottom: 0.9rem;
+        }
+        .section-kicker {
+            color: #0f4c81;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 700;
+            margin-bottom: 0.3rem;
+        }
+        .section-title {
+            color: #0f172a;
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin-bottom: 0.2rem;
+        }
+        .section-text {
+            color: #475569;
+            line-height: 1.65;
+            font-size: 0.95rem;
+        }
+        .section-panel.compact {
+            min-height: 150px;
+        }
+        .question-facts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            margin-top: 0.7rem;
+        }
+        .question-fact {
+            min-width: 132px;
+            padding: 0.7rem 0.85rem;
+            border-radius: 18px;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            border: 1px solid rgba(15, 23, 42, 0.08);
+        }
+        .question-fact-label {
+            color: #64748b;
+            font-size: 0.78rem;
+            margin-bottom: 0.15rem;
+        }
+        .question-fact-value {
+            color: #0f172a;
+            font-size: 1.05rem;
+            font-weight: 700;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_page_banner(title: str, subtitle: str, eyebrow: str, chips: Optional[List[str]] = None) -> None:
+    chip_html = "".join(f'<span class="meta-chip">{escape(chip)}</span>' for chip in (chips or []))
+    st.markdown(
+        f"""
+        <div class="app-hero">
+          <div class="app-hero-eyebrow">{escape(eyebrow)}</div>
+          <h1>{escape(title)}</h1>
+          <p>{escape(subtitle)}</p>
+          <div class="app-hero-chips">{chip_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: int = 0) -> None:
@@ -905,7 +1127,12 @@ def load_records() -> pd.DataFrame:
 
 
 def render_admin() -> None:
-    st.title("PCRAR 3D推理考试 管理后台")
+    render_page_banner(
+        "PCRAR 管理后台",
+        "查看考试记录、统计正确率，并管理导出数据。",
+        "Admin Console",
+        chips=["记录管理", "统计分析", "CSV 导出"],
+    )
     if st.button("退出登录"):
         reset_exam_state()
         st.session_state.logged_in = False
@@ -968,25 +1195,30 @@ def render_admin() -> None:
 
 
 def render_exam() -> None:
-    st.title("PCRAR 3D推理考试")
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stCheckbox"] label > div:first-child {
-            transform: scale(1.35);
-            transform-origin: left center;
-        }
-        div[data-testid="stCheckbox"] label {
-            align-items: center;
-        }
-        </style>
+    answered = len(st.session_state.answers)
+    render_page_banner(
+        "PCRAR 3D 推理考试",
+        "在同一视野内观察九宫格、比对候选点云并完成作答，减少上下滚动。",
+        "Point Cloud Matrix Reasoning",
+        chips=[
+            f"用户：{st.session_state.username}",
+            f"模式：{get_mode_description(st.session_state.mode)}",
+            f"已作答：{answered}/{TOTAL_QUESTIONS}",
+        ],
+    )
+
+    st.sidebar.markdown("## 考试设置")
+    st.sidebar.markdown(
+        f"""
+        <div class="section-panel" style="background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.12); box-shadow: none;">
+          <div class="section-kicker" style="color:#dbeafe;">当前用户</div>
+          <div class="section-title" style="color:#ffffff; margin-bottom:0.15rem;">{escape(st.session_state.username)}</div>
+          <div class="section-text" style="color:#d8e7f6;">在此切换规则模式、生成试卷和跳转题号。</div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.sidebar.header("考试设置")
-    st.sidebar.write(f"用户：{st.session_state.username}")
-    
     st.sidebar.subheader("选择考试模式")
     current_mode = st.session_state.mode
     mode_idx = MODE_IDS.index(current_mode) if current_mode in MODE_IDS else 0
@@ -1003,7 +1235,6 @@ def render_exam() -> None:
 
     st.session_state.difficulty = "easy"
     
-    # 显示当前模式描述
     st.sidebar.caption(get_mode_description(st.session_state.mode))
     st.sidebar.caption(f"难度：{DIFFICULTY_LABELS.get(st.session_state.difficulty, st.session_state.difficulty)}")
 
@@ -1025,17 +1256,38 @@ def render_exam() -> None:
         st.rerun()
 
     if not st.session_state.exam_generated:
-        st.info("请先在侧边栏选择考试模式并生成试卷。")
-        st.subheader("考试模式说明")
-        st.markdown("""
-        - **题型**: 3x3 九宫格矩阵补全（目标格固定右下角，可附加缺失格）
-        - **难度**: 固定为 easy，仅遮挡第9格（右下角）
-        - **规则**: 同一规则实例 T 作用于整张矩阵
-        - **步长**: 横向步长 k_h、纵向步长 k_v，按指数公式生成
-        - **目标**: 从候选中选出唯一满足真实关系 T 的目标格
-        """)
-        
-        st.subheader("规则说明")
+        st.markdown(
+            """
+            <div class="section-panel">
+              <div class="section-kicker">开始前</div>
+              <div class="section-title">先生成试卷，再进入作答界面</div>
+              <div class="section-text">
+                当前系统固定为 3x3 九宫格补全题，缺失格位于右下角。你可以先在左侧选择规则模式，再生成整套题目。
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        intro_cols = st.columns(5)
+        intro_items = [
+            ("题型", "3x3 九宫格矩阵补全"),
+            ("缺失位置", "固定第 9 格"),
+            ("难度", "easy"),
+            ("规则作用", "同一关系贯穿整张矩阵"),
+            ("目标", "从 A-D 中选唯一正确答案"),
+        ]
+        for col, (label, value) in zip(intro_cols, intro_items):
+            with col:
+                st.markdown(
+                    f"""
+                    <div class="question-fact">
+                      <div class="question-fact-label">{escape(label)}</div>
+                      <div class="question-fact-value">{escape(value)}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
         rule_desc = {
             "递进规则 (Progression)": "属性沿固定步长变化：尺寸/姿态的递进",
             "Distribute-three规则 (Distribute-three)": "固定 3 档分布：密度 / 尺寸 / 形状 / 颜色（同一行/列三格各出现一次）",
@@ -1044,12 +1296,22 @@ def render_exam() -> None:
             "置换规则 (Permutation)": "位置槽位循环置换",
             "对称规则 (Symmetry)": "对称变换：仅2个几何体；姿态/尺寸均为左+Δ右-Δ",
         }
-        for name, desc in rule_desc.items():
-            st.markdown(f"- **{name}**: {desc}")
-        
+        st.markdown("### 规则说明")
+        rule_cols = st.columns(3)
+        for i, (name, desc) in enumerate(rule_desc.items()):
+            with rule_cols[i % 3]:
+                st.markdown(
+                    f"""
+                    <div class="section-panel compact">
+                      <div class="section-kicker">Rule</div>
+                      <div class="section-title">{escape(name)}</div>
+                      <div class="section-text">{escape(desc)}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
         return
 
-    answered = len(st.session_state.answers)
     st.sidebar.metric("已作答", f"{answered}/{TOTAL_QUESTIONS}")
     current_q = st.sidebar.number_input(
         "当前题号",
@@ -1070,25 +1332,62 @@ def render_exam() -> None:
     rule_template = entry.get("rule_template", entry.get("rule", {}).get("template", ""))
     k_h = entry.get("k_h")
     k_v = entry.get("k_v")
-    
-    st.subheader(f"题目 {idx + 1}/{TOTAL_QUESTIONS}")
-    st.caption(
-        "题型: "
-        f"{task_name} | 规则: {rule_template} | 难度: {DIFFICULTY_LABELS.get(st.session_state.difficulty, st.session_state.difficulty)}"
-        f" | k_h={k_h}, k_v={k_v}"
+
+    st.markdown(
+        f"""
+        <div class="section-panel">
+          <div class="section-kicker">当前题目</div>
+          <div class="section-title">题目 {idx + 1}/{TOTAL_QUESTIONS}</div>
+          <div class="section-text">保持当前视角进行比对，右侧候选区和上方第九格预览会同步联动。</div>
+          <div class="question-facts">
+            <div class="question-fact">
+              <div class="question-fact-label">题型</div>
+              <div class="question-fact-value">{escape(str(task_name))}</div>
+            </div>
+            <div class="question-fact">
+              <div class="question-fact-label">规则</div>
+              <div class="question-fact-value">{escape(str(rule_template))}</div>
+            </div>
+            <div class="question-fact">
+              <div class="question-fact-label">难度</div>
+              <div class="question-fact-value">{escape(str(DIFFICULTY_LABELS.get(st.session_state.difficulty, st.session_state.difficulty)))}</div>
+            </div>
+            <div class="question-fact">
+              <div class="question-fact-label">k_h</div>
+              <div class="question-fact-value">{escape(str(k_h))}</div>
+            </div>
+            <div class="question-fact">
+              <div class="question-fact-label">k_v</div>
+              <div class="question-fact-value">{escape(str(k_v))}</div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    st.download_button(
-        "下载本题 meta.json",
-        data=json.dumps(entry, ensure_ascii=False, indent=2),
-        file_name=f"{entry.get('id','question')}_meta.json",
-        mime="application/json",
-    )
-    
-    control_cols = st.columns([1, 7])
+
+    control_cols = st.columns([1.2, 1.4, 5.4])
     with control_cols[0]:
         if st.button("重置当前题目视角"):
             st.session_state.viewer_reset_nonce += 1
             st.rerun()
+    with control_cols[1]:
+        st.download_button(
+            "下载本题 meta.json",
+            data=json.dumps(entry, ensure_ascii=False, indent=2),
+            file_name=f"{entry.get('id','question')}_meta.json",
+            mime="application/json",
+        )
+    with control_cols[2]:
+        st.markdown(
+            """
+            <div class="section-panel" style="padding: 0.85rem 1rem; margin-bottom: 0;">
+              <div class="section-kicker">操作提示</div>
+              <div class="section-text">A/B/C/D 既是答案选项，也是第九格的预览开关；选“不显示”可只看原始题干。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     grid_paths = entry.get("grid_paths", [])
     candidate_paths = entry.get("candidate_paths", [])
@@ -1105,28 +1404,43 @@ def render_exam() -> None:
     if len(cand_labels) > 4:
         cand_labels = cand_labels[:4]
 
-    st.markdown("### 九宫格合并视图")
+    st.markdown("### 九宫格作答区")
     reset_nonce = st.session_state.viewer_reset_nonce
 
     if not cand_labels:
         st.error("当前题目没有候选项。")
         return
 
-    merge_options = ["不显示"] + cand_labels
+    options = cand_labels[:4]
+    answer_key = f"answer_{idx}"
+    merge_options = ["不显示"] + options
     merge_choice_key = f"merge_candidate_choice_{idx}"
-    current_merge_choice = st.session_state.get(merge_choice_key, "不显示")
+    current_answer = st.session_state.answers.get(idx)
+    if current_answer not in options:
+        current_answer = None
+    current_merge_choice = st.session_state.get(merge_choice_key)
     if current_merge_choice not in merge_options:
-        current_merge_choice = "不显示"
+        current_merge_choice = current_answer if current_answer in options else "不显示"
         st.session_state[merge_choice_key] = current_merge_choice
     selected_merge_candidate = st.radio(
-        "打开第九格",
+        "第九格预览 / 直接作答",
         merge_options,
         index=merge_options.index(current_merge_choice),
         key=merge_choice_key,
         horizontal=True,
     )
-    if selected_merge_candidate == "不显示":
-        selected_merge_candidate = None
+    if selected_merge_candidate in options:
+        st.session_state[answer_key] = selected_merge_candidate
+        st.session_state.answers[idx] = selected_merge_candidate
+        current_answer = selected_merge_candidate
+    elif current_answer in options:
+        st.session_state[answer_key] = current_answer
+        st.session_state.answers[idx] = current_answer
+    else:
+        st.session_state.pop(answer_key, None)
+        st.session_state.answers.pop(idx, None)
+        current_answer = None
+    selected_candidate_for_view = selected_merge_candidate if selected_merge_candidate in options else None
 
     # 构建九宫格合并视图：仅展示已知格，缺失格保持空白
     spacing = BIG_VIEW_GRID_SPACING
@@ -1151,12 +1465,12 @@ def render_exam() -> None:
                     ]
                 )
 
-    if selected_merge_candidate is not None:
-        cand_idx = ord(selected_merge_candidate) - ord("A")
+    if selected_candidate_for_view is not None:
+        cand_idx = ord(selected_candidate_for_view) - ord("A")
         if 0 <= cand_idx < len(candidate_paths):
             cand_path = candidate_paths[cand_idx]
             contents.append(load_ply_text(resolve_ply_path(exam_root, cand_path)))
-            labels.append(f"cand[{selected_merge_candidate}]")
+            labels.append(f"cand[{selected_candidate_for_view}]")
             offsets.append(
                 [
                     float((int(target_pos[1]) - 1) * spacing),
@@ -1164,12 +1478,14 @@ def render_exam() -> None:
                     float((1 - int(target_pos[0])) * row_depth),
                 ]
             )
+    workspace_cols = st.columns([3.6, 2.4], gap="large")
+    with workspace_cols[0]:
+        if selected_candidate_for_view is not None:
             st.caption(
-                f"当前合并视图已将选项 {selected_merge_candidate} 放到缺失格位置 {tuple(map(int, target_pos))}。"
+                f"当前已把选项 {selected_candidate_for_view} 放到缺失格位置 {tuple(map(int, target_pos))}。"
             )
-
-    merge_view_cols = st.columns([5, 2])
-    with merge_view_cols[0]:
+        else:
+            st.caption("当前只显示题干九宫格；选择 A/B/C/D 会同时预览并记录答案。")
         pl_multi_component(
             contents,
             labels,
@@ -1177,41 +1493,50 @@ def render_exam() -> None:
             height=BIG_PLY_HEIGHT,
             reset_nonce=reset_nonce,
         )
-    with merge_view_cols[1]:
+    with workspace_cols[1]:
+        answer_display = current_answer if current_answer in options else "未作答"
+        preview_display = selected_candidate_for_view or "不显示"
         st.markdown(
-            "<p style='color: #d32f2f; font-weight: 700;'>（在页面最下方选择答案！）</p>",
+            f"""
+            <div style="
+                padding: 14px 16px;
+                border-radius: 16px;
+                border: 1px solid rgba(30, 41, 59, 0.10);
+                background: linear-gradient(135deg, #f8fafc 0%, #eef6ff 100%);
+                margin-bottom: 12px;
+            ">
+              <div style="font-size: 12px; color: #475569; margin-bottom: 6px;">当前状态</div>
+              <div style="font-size: 24px; font-weight: 700; color: #0f172a;">答案：{answer_display}</div>
+              <div style="font-size: 13px; color: #334155; margin-top: 6px;">第九格预览：{preview_display}</div>
+              <div style="font-size: 12px; color: #64748b; margin-top: 8px;">
+                选择 A/B/C/D 会同时完成预览和作答；选“不显示”只隐藏第九格，不清空已有答案。
+              </div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
-
-    st.markdown("### 4个选项点云")
-    cand_cols = st.columns(4)
-    for i in range(4):
-        with cand_cols[i]:
-            label = chr(ord("A") + i)
-            st.caption(f"选项 {label}")
-            if i < len(candidate_paths):
-                pl_component(
-                    load_ply_text(resolve_ply_path(exam_root, candidate_paths[i])),
-                    reset_nonce=reset_nonce,
-                )
-            else:
-                st.info("空")
-
-    options = cand_labels[:4]
-    answer_key = f"answer_{idx}"
-    current_answer = st.session_state.answers.get(idx, st.session_state.get(answer_key, options[0]))
-    if current_answer not in options:
-        current_answer = options[0]
-    if answer_key not in st.session_state:
-        st.session_state[answer_key] = current_answer
-    choice = st.radio(
-        "选择答案",
-        options,
-        index=options.index(st.session_state[answer_key]),
-        key=answer_key,
-        horizontal=True,
-    )
-    st.session_state.answers[idx] = choice
+        st.markdown("#### 候选点云")
+        for row_start in range(0, 4, 2):
+            candidate_row = st.columns(2, gap="small")
+            for offset, col in enumerate(candidate_row):
+                cand_idx = row_start + offset
+                with col:
+                    label = chr(ord("A") + cand_idx)
+                    tag = []
+                    if label == current_answer:
+                        tag.append("当前答案")
+                    if label == selected_candidate_for_view:
+                        tag.append("正在预览")
+                    suffix = f" · {' / '.join(tag)}" if tag else ""
+                    st.caption(f"选项 {label}{suffix}")
+                    if cand_idx < len(candidate_paths):
+                        pl_component(
+                            load_ply_text(resolve_ply_path(exam_root, candidate_paths[cand_idx])),
+                            height=OPTION_PLY_HEIGHT,
+                            reset_nonce=reset_nonce,
+                        )
+                    else:
+                        st.info("空")
 
     nav_cols = st.columns(3)
     with nav_cols[0]:
@@ -1283,17 +1608,29 @@ def render_exam() -> None:
 
 
 def render_login() -> None:
-    st.title("PCRAR 3D推理考试 登录")
-    st.markdown("""
-    **PCRAR**: Point Cloud Matrix Reasoning
-    
-    基于 CSG 布尔几何体的 3D 九宫格矩阵推理考试系统
-    """)
-    
-    with st.form("login_form"):
-        username = st.text_input("姓名/ID")
-        password = st.text_input("管理员密码（仅 admin）", type="password")
-        submitted = st.form_submit_button("登录")
+    render_page_banner(
+        "PCRAR 3D 推理考试",
+        "基于点云的 3x3 九宫格矩阵补全系统，聚焦观察、比对与规则推理。",
+        "Point Cloud Matrix Reasoning",
+        chips=["3D 点云", "九宫格推理", "单屏作答"],
+    )
+
+    shell_cols = st.columns([1.1, 1, 1.1])
+    with shell_cols[1]:
+        st.markdown(
+            """
+            <div class="section-panel">
+              <div class="section-kicker">登录</div>
+              <div class="section-title">输入姓名或管理员账号</div>
+              <div class="section-text">普通用户直接输入姓名/ID 即可开始；管理员账号需要额外密码。</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.form("login_form"):
+            username = st.text_input("姓名/ID")
+            password = st.text_input("管理员密码（仅 admin）", type="password")
+            submitted = st.form_submit_button("登录")
     if not submitted:
         return
     if not username.strip():
@@ -1319,6 +1656,7 @@ def main() -> None:
         layout="wide",
     )
     init_state()
+    render_theme_styles()
     if not st.session_state.logged_in:
         render_login()
         return
