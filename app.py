@@ -4,7 +4,7 @@ import hashlib
 import json
 import tempfile
 from datetime import datetime
-from collections import Counter
+from collections import Counter, defaultdict
 from html import escape
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -132,6 +132,10 @@ def mode_display_name(mode: str) -> str:
         if text == template.value:
             return short_name
     return text
+
+
+def safe_div(numerator: float, denominator: float) -> float:
+    return float(numerator) / float(denominator) if denominator else 0.0
 
 
 def normalize_template_value(template_name: str, default: RuleTemplate) -> str:
@@ -1126,6 +1130,219 @@ def load_records() -> pd.DataFrame:
     return normalized_df
 
 
+def _result_file_sort_key(path: Path) -> tuple[int, str]:
+    stem = path.stem
+    parts = stem.rsplit("_", 2)
+    if len(parts) == 3:
+        timestamp_str = f"{parts[1]}_{parts[2]}"
+        try:
+            dt = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+            return (int(dt.timestamp()), path.name)
+        except ValueError:
+            pass
+    try:
+        return (int(path.stat().st_mtime), path.name)
+    except OSError:
+        return (0, path.name)
+
+
+def load_result_payloads() -> List[Dict]:
+    if not RESULTS_DIR.exists():
+        return []
+    payloads: List[Dict] = []
+    for path in sorted(RESULTS_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        payloads.append(
+            {
+                "path": str(path),
+                "sort_key": _result_file_sort_key(path),
+                "data": payload,
+            }
+        )
+    return payloads
+
+
+def build_group_export_payload(
+    result_payloads: List[Dict],
+    user_start: int = 1,
+    user_end: int = 30,
+) -> Optional[Dict]:
+    latest_by_user: Dict[int, Dict] = {}
+    for item in result_payloads:
+        data = item.get("data", {})
+        username = str(data.get("username", "")).strip()
+        if not username:
+            continue
+        try:
+            user_idx = int(username)
+        except (TypeError, ValueError):
+            continue
+        if user_idx < user_start or user_idx > user_end:
+            continue
+        current = latest_by_user.get(user_idx)
+        if current is None or item["sort_key"] > current["sort_key"]:
+            latest_by_user[user_idx] = item
+
+    if not latest_by_user:
+        return None
+
+    included_users = sorted(int(name) for name in latest_by_user.keys())
+    target_users = list(range(user_start, user_end + 1))
+    missing_users = [idx for idx in target_users if idx not in included_users]
+
+    per_user_rows: List[Dict] = []
+    per_rule_totals = Counter()
+    per_rule_correct = Counter()
+    wrong_type_counts = Counter()
+    attribute_exposure_counts = Counter()
+    attribute_wrong_counts = Counter()
+    perturbation_exposure_counts = Counter()
+    perturbation_wrong_counts = Counter()
+
+    total_questions = 0
+    total_correct = 0
+    total_wrong = 0
+    mean_accuracy_sum = 0.0
+
+    for user_idx in included_users:
+        item = latest_by_user[user_idx]
+        data = item["data"]
+        questions = data.get("questions", [])
+        if not isinstance(questions, list):
+            questions = []
+        total = int(data.get("total", len(questions)) or 0)
+        score = int(data.get("score", 0) or 0)
+        accuracy = float(data.get("accuracy", safe_div(score, total)))
+        mean_accuracy_sum += accuracy
+        total_questions += total
+        total_correct += score
+        total_wrong += max(0, total - score)
+        per_user_rows.append(
+            {
+                "username": str(user_idx),
+                "mode": mode_display_name(str(data.get("mode", ""))),
+                "difficulty": str(data.get("difficulty", "")),
+                "score": score,
+                "total": total,
+                "accuracy": round(accuracy, 4),
+                "source_file": item["path"],
+            }
+        )
+
+        for question in questions:
+            if not isinstance(question, dict):
+                continue
+            rule_name = str(question.get("rule_template", "未知"))
+            is_correct = bool(question.get("is_correct", False))
+            per_rule_totals[rule_name] += 1
+            if is_correct:
+                per_rule_correct[rule_name] += 1
+
+            question_attrs = question.get("question_attributes", [])
+            if isinstance(question_attrs, list):
+                for attr in question_attrs:
+                    attr_name = str(attr).strip()
+                    if not attr_name:
+                        continue
+                    attribute_exposure_counts[attr_name] += 1
+                    if not is_correct:
+                        attribute_wrong_counts[attr_name] += 1
+
+            perturbation_type = str(question.get("point_cloud_perturbation_type", "")).strip()
+            if perturbation_type:
+                perturbation_exposure_counts[perturbation_type] += 1
+                if not is_correct:
+                    perturbation_wrong_counts[perturbation_type] += 1
+
+            if not is_correct:
+                selected_type = str(question.get("selected_distractor_type", "")).strip()
+                if selected_type:
+                    wrong_type_counts[selected_type] += 1
+
+    typed_wrong_total = sum(wrong_type_counts.get(key, 0) for key in ERROR_TYPE_KEYS)
+    error_type_ratio = {
+        key: round(safe_div(wrong_type_counts.get(key, 0), typed_wrong_total), 4)
+        for key in ERROR_TYPE_KEYS
+    }
+
+    attr_error_rate_raw: Dict[str, float] = {}
+    for attr, exposed in attribute_exposure_counts.items():
+        if int(exposed) <= 0:
+            continue
+        attr_error_rate_raw[attr] = float(attribute_wrong_counts.get(attr, 0)) / float(exposed)
+    attr_rate_sum = sum(attr_error_rate_raw.values())
+    error_attribute_rate = {
+        attr: round(rate, 4)
+        for attr, rate in sorted(attr_error_rate_raw.items(), key=lambda item: (-item[1], item[0]))
+    }
+    error_attribute_ratio_normalized = {
+        attr: round((rate / attr_rate_sum), 4) if attr_rate_sum else 0.0
+        for attr, rate in sorted(attr_error_rate_raw.items(), key=lambda item: (-item[1], item[0]))
+    }
+    attribute_exposure_ratio = {
+        attr: round(safe_div(attribute_exposure_counts[attr], total_questions), 4)
+        for attr in sorted(attribute_exposure_counts.keys())
+    }
+
+    error_perturbation_ratio = {}
+    perturbation_exposure_ratio = {}
+    for perturb_type in sorted(perturbation_exposure_counts.keys()):
+        exposed = int(perturbation_exposure_counts.get(perturb_type, 0))
+        wrong = int(perturbation_wrong_counts.get(perturb_type, 0))
+        error_perturbation_ratio[perturb_type] = round(safe_div(wrong, exposed), 4) if exposed else 0.0
+        perturbation_exposure_ratio[perturb_type] = round(safe_div(exposed, total_questions), 4)
+
+    per_rule_accuracy = {}
+    for rule_name in sorted(per_rule_totals.keys()):
+        total = int(per_rule_totals[rule_name])
+        correct = int(per_rule_correct.get(rule_name, 0))
+        per_rule_accuracy[rule_name] = {
+            "correct": correct,
+            "total": total,
+            "accuracy": round(safe_div(correct, total), 4),
+        }
+
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "scope": {
+            "user_range": [user_start, user_end],
+            "selection_policy": "latest_result_per_username_from_results_dir",
+            "results_dir": str(RESULTS_DIR.resolve()),
+        },
+        "participant_summary": {
+            "target_user_count": len(target_users),
+            "included_user_count": len(included_users),
+            "included_users": included_users,
+            "missing_users": missing_users,
+        },
+        "accuracy_summary": {
+            "mean_user_accuracy": round(safe_div(mean_accuracy_sum, len(included_users)), 4),
+            "pooled_accuracy": round(safe_div(total_correct, total_questions), 4),
+            "total_correct": total_correct,
+            "total_questions": total_questions,
+            "total_wrong": total_wrong,
+        },
+        "per_user_results": per_user_rows,
+        "per_rule_accuracy": per_rule_accuracy,
+        "error_type_counts": {key: int(wrong_type_counts.get(key, 0)) for key in ERROR_TYPE_KEYS},
+        "error_type_ratio": error_type_ratio,
+        "attribute_exposure_counts": dict(sorted(attribute_exposure_counts.items())),
+        "attribute_wrong_counts": dict(sorted(attribute_wrong_counts.items())),
+        "error_attribute_rate": error_attribute_rate,
+        "error_attribute_ratio_normalized": error_attribute_ratio_normalized,
+        "attribute_exposure_ratio": attribute_exposure_ratio,
+        "perturbation_exposure_counts": dict(sorted(perturbation_exposure_counts.items())),
+        "perturbation_wrong_counts": dict(sorted(perturbation_wrong_counts.items())),
+        "error_perturbation_ratio": error_perturbation_ratio,
+        "perturbation_exposure_ratio": perturbation_exposure_ratio,
+    }
+
+
 def render_admin() -> None:
     render_page_banner(
         "PCRAR 管理后台",
@@ -1143,54 +1360,89 @@ def render_admin() -> None:
     df = load_records()
     if df.empty:
         st.info("暂无考试记录。")
+    else:
+        display_df = df.copy()
+        display_df["mode"] = display_df["mode"].apply(mode_display_name)
+
+        st.subheader("考试记录")
+        st.dataframe(display_df, use_container_width=True)
+
+        st.subheader("删除考试记录")
+        df = df.reset_index(drop=True)
+        display_df = display_df.reset_index(drop=True)
+        label_to_index = {}
+        option_labels = []
+        for idx, row in display_df.iterrows():
+            label = (
+                f"{idx + 1}: {row.get('username', '')} | {row.get('mode', '')} | "
+                f"{row.get('score', '')}/{row.get('total', '')} | {row.get('accuracy', '')}"
+            )
+            option_labels.append(label)
+            label_to_index[label] = idx
+        selected = st.multiselect("选择要删除的记录", option_labels)
+        if st.button("删除选中记录"):
+            if not selected:
+                st.warning("请先选择要删除的记录。")
+            else:
+                drop_indices = [label_to_index[label] for label in selected]
+                new_df = df.drop(index=drop_indices).reset_index(drop=True)
+                new_df.to_csv(RECORDS_PATH, index=False)
+                st.success(f"已删除 {len(drop_indices)} 条记录。")
+                st.rerun()
+
+        st.subheader("各用户正确率")
+        user_acc = df.groupby("username")["accuracy"].mean().sort_values(ascending=False)
+        st.bar_chart(user_acc)
+
+        st.subheader("各规则平均正确率")
+        mode_acc = display_df.groupby("mode")["accuracy"].mean()
+        rule_df = pd.DataFrame(
+            {"正确率": [mode_acc.get(name, 0.0) for name in ["递进", "循环", "增减", "守恒", "置换", "对称"]]},
+            index=["递进", "循环", "增减", "守恒", "置换", "对称"],
+        )
+        st.bar_chart(rule_df)
+
+        st.download_button(
+            "下载 CSV",
+            data=df.to_csv(index=False).encode("utf-8"),
+            file_name="exam_records.csv",
+            mime="text/csv",
+        )
+
+    st.subheader("用户 1-30 整体导出")
+    result_payloads = load_result_payloads()
+    group_payload = build_group_export_payload(result_payloads, user_start=1, user_end=30)
+    if group_payload is None:
+        st.info("未找到 `results/*.json` 结果文件，暂时无法生成用户 1-30 的整体汇总导出。")
         return
 
-    display_df = df.copy()
-    display_df["mode"] = display_df["mode"].apply(mode_display_name)
+    participant_summary = group_payload["participant_summary"]
+    accuracy_summary = group_payload["accuracy_summary"]
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("覆盖用户数", f"{participant_summary['included_user_count']}/{participant_summary['target_user_count']}")
+    metric_cols[1].metric("平均正确率", f"{accuracy_summary['mean_user_accuracy']:.2%}")
+    metric_cols[2].metric("题目池正确率", f"{accuracy_summary['pooled_accuracy']:.2%}")
+    metric_cols[3].metric("总题数", str(accuracy_summary["total_questions"]))
 
-    st.subheader("考试记录")
-    st.dataframe(display_df, use_container_width=True)
+    if participant_summary["missing_users"]:
+        missing_text = ", ".join(str(x) for x in participant_summary["missing_users"])
+        st.caption(f"缺少结果的用户：{missing_text}")
 
-    st.subheader("删除考试记录")
-    df = df.reset_index(drop=True)
-    display_df = display_df.reset_index(drop=True)
-    label_to_index = {}
-    option_labels = []
-    for idx, row in display_df.iterrows():
-        label = (
-            f"{idx + 1}: {row.get('username', '')} | {row.get('mode', '')} | "
-            f"{row.get('score', '')}/{row.get('total', '')} | {row.get('accuracy', '')}"
+    per_user_df = pd.DataFrame(group_payload["per_user_results"])
+    if not per_user_df.empty:
+        st.dataframe(per_user_df, use_container_width=True)
+        st.download_button(
+            "下载用户 1-30 汇总 CSV",
+            data=per_user_df.to_csv(index=False).encode("utf-8"),
+            file_name="user_1_30_summary.csv",
+            mime="text/csv",
         )
-        option_labels.append(label)
-        label_to_index[label] = idx
-    selected = st.multiselect("选择要删除的记录", option_labels)
-    if st.button("删除选中记录"):
-        if not selected:
-            st.warning("请先选择要删除的记录。")
-        else:
-            drop_indices = [label_to_index[label] for label in selected]
-            new_df = df.drop(index=drop_indices).reset_index(drop=True)
-            new_df.to_csv(RECORDS_PATH, index=False)
-            st.success(f"已删除 {len(drop_indices)} 条记录。")
-            st.rerun()
-
-    st.subheader("各用户正确率")
-    user_acc = df.groupby("username")["accuracy"].mean().sort_values(ascending=False)
-    st.bar_chart(user_acc)
-
-    st.subheader("各规则平均正确率")
-    mode_acc = display_df.groupby("mode")["accuracy"].mean()
-    rule_df = pd.DataFrame(
-        {"正确率": [mode_acc.get(name, 0.0) for name in ["递进", "循环", "增减", "守恒", "置换", "对称"]]},
-        index=["递进", "循环", "增减", "守恒", "置换", "对称"],
-    )
-    st.bar_chart(rule_df)
 
     st.download_button(
-        "下载 CSV",
-        data=df.to_csv(index=False).encode("utf-8"),
-        file_name="exam_records.csv",
-        mime="text/csv",
+        "下载用户 1-30 汇总 JSON",
+        data=json.dumps(group_payload, ensure_ascii=False, indent=2),
+        file_name="user_1_30_aggregate.json",
+        mime="application/json",
     )
 
 
