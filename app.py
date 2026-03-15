@@ -1167,12 +1167,31 @@ def load_result_payloads() -> List[Dict]:
     return payloads
 
 
-def build_group_export_payload(
+def infer_result_rule_name(result_data: Dict) -> str:
+    mode_text = str(result_data.get("mode", "")).strip()
+    if mode_text:
+        display = mode_display_name(mode_text)
+        if display:
+            return display
+    questions = result_data.get("questions", [])
+    if isinstance(questions, list):
+        for question in questions:
+            if not isinstance(question, dict):
+                continue
+            rule_text = str(question.get("rule_template", "")).strip()
+            if rule_text:
+                display = mode_display_name(rule_text)
+                if display:
+                    return display
+    return "未知"
+
+
+def collect_latest_results_by_user_rule(
     result_payloads: List[Dict],
-    user_start: int = 1,
-    user_end: int = 30,
-) -> Optional[Dict]:
-    latest_by_user: Dict[int, Dict] = {}
+    user_start: int,
+    user_end: int,
+) -> Dict[int, Dict[str, Dict]]:
+    latest_by_user_rule: Dict[int, Dict[str, Dict]] = defaultdict(dict)
     for item in result_payloads:
         data = item.get("data", {})
         username = str(data.get("username", "")).strip()
@@ -1184,15 +1203,44 @@ def build_group_export_payload(
             continue
         if user_idx < user_start or user_idx > user_end:
             continue
-        current = latest_by_user.get(user_idx)
+        rule_name = infer_result_rule_name(data)
+        current = latest_by_user_rule[user_idx].get(rule_name)
         if current is None or item["sort_key"] > current["sort_key"]:
-            latest_by_user[user_idx] = item
+            latest_by_user_rule[user_idx][rule_name] = item
+    return latest_by_user_rule
 
-    if not latest_by_user:
+
+def build_group_export_payload(
+    result_payloads: List[Dict],
+    user_start: int = 1,
+    user_end: int = 30,
+    selected_rule: Optional[str] = None,
+) -> Optional[Dict]:
+    latest_by_user_rule = collect_latest_results_by_user_rule(result_payloads, user_start, user_end)
+    if not latest_by_user_rule:
         return None
 
-    included_users = sorted(int(name) for name in latest_by_user.keys())
     target_users = list(range(user_start, user_end + 1))
+    canonical_rule = mode_display_name(selected_rule) if selected_rule else None
+    if canonical_rule in ("全部规则", ""):
+        canonical_rule = None
+
+    selected_items_by_user: Dict[int, List[Dict]] = {}
+    for user_idx in target_users:
+        rule_map = latest_by_user_rule.get(user_idx, {})
+        if canonical_rule is None:
+            items = [rule_map[rule_name] for rule_name in sorted(rule_map.keys())]
+        elif canonical_rule in rule_map:
+            items = [rule_map[canonical_rule]]
+        else:
+            items = []
+        if items:
+            selected_items_by_user[user_idx] = items
+
+    if not selected_items_by_user:
+        return None
+
+    included_users = sorted(selected_items_by_user.keys())
     missing_users = [idx for idx in target_users if idx not in included_users]
 
     per_user_rows: List[Dict] = []
@@ -1207,62 +1255,77 @@ def build_group_export_payload(
     total_questions = 0
     total_correct = 0
     total_wrong = 0
-    mean_accuracy_sum = 0.0
 
     for user_idx in included_users:
-        item = latest_by_user[user_idx]
-        data = item["data"]
-        questions = data.get("questions", [])
-        if not isinstance(questions, list):
-            questions = []
-        total = int(data.get("total", len(questions)) or 0)
-        score = int(data.get("score", 0) or 0)
-        accuracy = float(data.get("accuracy", safe_div(score, total)))
-        mean_accuracy_sum += accuracy
-        total_questions += total
-        total_correct += score
-        total_wrong += max(0, total - score)
+        user_items = selected_items_by_user[user_idx]
+        user_total = 0
+        user_score = 0
+        submitted_rules: List[str] = []
+        source_files: List[str] = []
         per_user_rows.append(
+            {}
+        )
+        row_ref = per_user_rows[-1]
+        for item in user_items:
+            data = item["data"]
+            result_rule = infer_result_rule_name(data)
+            submitted_rules.append(result_rule)
+            source_files.append(item["path"])
+            questions = data.get("questions", [])
+            if not isinstance(questions, list):
+                questions = []
+            total = int(data.get("total", len(questions)) or 0)
+            score = int(data.get("score", 0) or 0)
+            user_total += total
+            user_score += score
+
+            for question in questions:
+                if not isinstance(question, dict):
+                    continue
+                question_rule_text = str(question.get("rule_template", "")).strip()
+                rule_name = mode_display_name(question_rule_text) if question_rule_text else result_rule
+                is_correct = bool(question.get("is_correct", False))
+                per_rule_totals[rule_name] += 1
+                if is_correct:
+                    per_rule_correct[rule_name] += 1
+
+                question_attrs = question.get("question_attributes", [])
+                if isinstance(question_attrs, list):
+                    for attr in question_attrs:
+                        attr_name = str(attr).strip()
+                        if not attr_name:
+                            continue
+                        attribute_exposure_counts[attr_name] += 1
+                        if not is_correct:
+                            attribute_wrong_counts[attr_name] += 1
+
+                perturbation_type = str(question.get("point_cloud_perturbation_type", "")).strip()
+                if perturbation_type:
+                    perturbation_exposure_counts[perturbation_type] += 1
+                    if not is_correct:
+                        perturbation_wrong_counts[perturbation_type] += 1
+
+                if not is_correct:
+                    selected_type = str(question.get("selected_distractor_type", "")).strip()
+                    if selected_type:
+                        wrong_type_counts[selected_type] += 1
+
+        user_accuracy = safe_div(user_score, user_total)
+        total_questions += user_total
+        total_correct += user_score
+        total_wrong += max(0, user_total - user_score)
+        row_ref.update(
             {
                 "username": str(user_idx),
-                "mode": mode_display_name(str(data.get("mode", ""))),
-                "difficulty": str(data.get("difficulty", "")),
-                "score": score,
-                "total": total,
-                "accuracy": round(accuracy, 4),
-                "source_file": item["path"],
+                "rule_scope": canonical_rule or "全部规则",
+                "submitted_rules": ", ".join(sorted(set(submitted_rules))),
+                "rule_count": len(set(submitted_rules)),
+                "score": user_score,
+                "total": user_total,
+                "accuracy": round(user_accuracy, 4),
+                "source_files": " | ".join(source_files),
             }
         )
-
-        for question in questions:
-            if not isinstance(question, dict):
-                continue
-            rule_name = str(question.get("rule_template", "未知"))
-            is_correct = bool(question.get("is_correct", False))
-            per_rule_totals[rule_name] += 1
-            if is_correct:
-                per_rule_correct[rule_name] += 1
-
-            question_attrs = question.get("question_attributes", [])
-            if isinstance(question_attrs, list):
-                for attr in question_attrs:
-                    attr_name = str(attr).strip()
-                    if not attr_name:
-                        continue
-                    attribute_exposure_counts[attr_name] += 1
-                    if not is_correct:
-                        attribute_wrong_counts[attr_name] += 1
-
-            perturbation_type = str(question.get("point_cloud_perturbation_type", "")).strip()
-            if perturbation_type:
-                perturbation_exposure_counts[perturbation_type] += 1
-                if not is_correct:
-                    perturbation_wrong_counts[perturbation_type] += 1
-
-            if not is_correct:
-                selected_type = str(question.get("selected_distractor_type", "")).strip()
-                if selected_type:
-                    wrong_type_counts[selected_type] += 1
 
     typed_wrong_total = sum(wrong_type_counts.get(key, 0) for key in ERROR_TYPE_KEYS)
     error_type_ratio = {
@@ -1311,7 +1374,8 @@ def build_group_export_payload(
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "scope": {
             "user_range": [user_start, user_end],
-            "selection_policy": "latest_result_per_username_from_results_dir",
+            "rule_scope": canonical_rule or "全部规则",
+            "selection_policy": "latest_result_per_username_per_rule_from_results_dir",
             "results_dir": str(RESULTS_DIR.resolve()),
         },
         "participant_summary": {
@@ -1321,8 +1385,7 @@ def build_group_export_payload(
             "missing_users": missing_users,
         },
         "accuracy_summary": {
-            "mean_user_accuracy": round(safe_div(mean_accuracy_sum, len(included_users)), 4),
-            "pooled_accuracy": round(safe_div(total_correct, total_questions), 4),
+            "overall_accuracy": round(safe_div(total_correct, total_questions), 4),
             "total_correct": total_correct,
             "total_questions": total_questions,
             "total_wrong": total_wrong,
@@ -1409,41 +1472,77 @@ def render_admin() -> None:
             mime="text/csv",
         )
 
-    st.subheader("用户 1-30 整体导出")
     result_payloads = load_result_payloads()
-    group_payload = build_group_export_payload(result_payloads, user_start=1, user_end=30)
-    if group_payload is None:
+    if not result_payloads:
         st.info("未找到 `results/*.json` 结果文件，暂时无法生成用户 1-30 的整体汇总导出。")
         return
 
-    participant_summary = group_payload["participant_summary"]
-    accuracy_summary = group_payload["accuracy_summary"]
-    metric_cols = st.columns(4)
-    metric_cols[0].metric("覆盖用户数", f"{participant_summary['included_user_count']}/{participant_summary['target_user_count']}")
-    metric_cols[1].metric("平均正确率", f"{accuracy_summary['mean_user_accuracy']:.2%}")
-    metric_cols[2].metric("题目池正确率", f"{accuracy_summary['pooled_accuracy']:.2%}")
-    metric_cols[3].metric("总题数", str(accuracy_summary["total_questions"]))
+    st.subheader("用户 1-30 整体导出（所有规则）")
+    all_rules_payload = build_group_export_payload(result_payloads, user_start=1, user_end=30, selected_rule=None)
+    if all_rules_payload is not None:
+        participant_summary = all_rules_payload["participant_summary"]
+        accuracy_summary = all_rules_payload["accuracy_summary"]
+        metric_cols = st.columns(3)
+        metric_cols[0].metric("覆盖用户数", f"{participant_summary['included_user_count']}/{participant_summary['target_user_count']}")
+        metric_cols[1].metric("整体正确率", f"{accuracy_summary['overall_accuracy']:.2%}")
+        metric_cols[2].metric("总题数", str(accuracy_summary["total_questions"]))
+
+        if participant_summary["missing_users"]:
+            missing_text = ", ".join(str(x) for x in participant_summary["missing_users"])
+            st.caption(f"完全未提交任何规则的用户：{missing_text}")
+
+        per_user_df = pd.DataFrame(all_rules_payload["per_user_results"])
+        if not per_user_df.empty:
+            st.dataframe(per_user_df, use_container_width=True)
+            st.download_button(
+                "下载所有规则汇总 CSV",
+                data=per_user_df.to_csv(index=False).encode("utf-8"),
+                file_name="user_1_30_all_rules_summary.csv",
+                mime="text/csv",
+            )
+
+        st.download_button(
+            "下载所有规则汇总 JSON",
+            data=json.dumps(all_rules_payload, ensure_ascii=False, indent=2),
+            file_name="user_1_30_all_rules_aggregate.json",
+            mime="application/json",
+        )
+
+    st.subheader("按规则导出")
+    rule_options = [RULE_SHORT_NAMES[template] for template in MODE_RULE_TEMPLATES]
+    selected_rule = st.selectbox("选择规则", rule_options)
+    rule_payload = build_group_export_payload(result_payloads, user_start=1, user_end=30, selected_rule=selected_rule)
+    if rule_payload is None:
+        st.info(f"当前没有找到规则 `{selected_rule}` 的提交结果。")
+        return
+
+    participant_summary = rule_payload["participant_summary"]
+    accuracy_summary = rule_payload["accuracy_summary"]
+    metric_cols = st.columns(3)
+    metric_cols[0].metric("已提交用户数", f"{participant_summary['included_user_count']}/{participant_summary['target_user_count']}")
+    metric_cols[1].metric("规则正确率", f"{accuracy_summary['overall_accuracy']:.2%}")
+    metric_cols[2].metric("总题数", str(accuracy_summary["total_questions"]))
 
     if participant_summary["missing_users"]:
         missing_text = ", ".join(str(x) for x in participant_summary["missing_users"])
-        st.caption(f"缺少结果的用户：{missing_text}")
+        st.caption(f"该规则尚未提交的用户：{missing_text}")
 
-    per_user_df = pd.DataFrame(group_payload["per_user_results"])
-    if not per_user_df.empty:
-        st.dataframe(per_user_df, use_container_width=True)
+    rule_user_df = pd.DataFrame(rule_payload["per_user_results"])
+    if not rule_user_df.empty:
+        st.dataframe(rule_user_df, use_container_width=True)
+        rule_slug = safe_slug(selected_rule)
         st.download_button(
-            "下载用户 1-30 汇总 CSV",
-            data=per_user_df.to_csv(index=False).encode("utf-8"),
-            file_name="user_1_30_summary.csv",
+            "下载该规则汇总 CSV",
+            data=rule_user_df.to_csv(index=False).encode("utf-8"),
+            file_name=f"user_1_30_{rule_slug}_summary.csv",
             mime="text/csv",
         )
-
-    st.download_button(
-        "下载用户 1-30 汇总 JSON",
-        data=json.dumps(group_payload, ensure_ascii=False, indent=2),
-        file_name="user_1_30_aggregate.json",
-        mime="application/json",
-    )
+        st.download_button(
+            "下载该规则汇总 JSON",
+            data=json.dumps(rule_payload, ensure_ascii=False, indent=2),
+            file_name=f"user_1_30_{rule_slug}_aggregate.json",
+            mime="application/json",
+        )
 
 
 def render_exam() -> None:
