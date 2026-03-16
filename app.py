@@ -1181,6 +1181,12 @@ def load_records() -> pd.DataFrame:
     return normalized_df
 
 
+def load_active_record_lookup() -> Dict[tuple[str, str], Dict]:
+    records = load_records().to_dict("records")
+    deduped = dedupe_record_rows(records)
+    return {record_dedupe_key(record): dict(record) for record in deduped}
+
+
 def build_record_from_result(result: Dict, sort_key: Optional[tuple[int, str]] = None) -> Dict:
     reason_payload = {
         "error_type_ratio": result.get("error_type_ratio", {}),
@@ -1280,6 +1286,7 @@ def collect_latest_results_by_user_rule(
     result_payloads: List[Dict],
     user_start: int,
     user_end: int,
+    active_record_lookup: Optional[Dict[tuple[str, str], Dict]] = None,
 ) -> Dict[int, Dict[str, Dict]]:
     latest_by_user_rule: Dict[int, Dict[str, Dict]] = defaultdict(dict)
     for item in result_payloads:
@@ -1293,10 +1300,19 @@ def collect_latest_results_by_user_rule(
             continue
         if user_idx < user_start or user_idx > user_end:
             continue
-        rule_name = infer_result_rule_name(data)
+        result_record = build_record_from_result(data, sort_key=item.get("sort_key"))
+        record_key = record_dedupe_key(result_record)
+        if active_record_lookup is not None and record_key not in active_record_lookup:
+            continue
+        rule_name = record_key[1] or infer_result_rule_name(data)
         current = latest_by_user_rule[user_idx].get(rule_name)
-        if current is None or item["sort_key"] > current["sort_key"]:
-            latest_by_user_rule[user_idx][rule_name] = item
+        if current is None or record_rank(result_record) > record_rank(current["record"]):
+            latest_by_user_rule[user_idx][rule_name] = {
+                "path": item["path"],
+                "sort_key": item["sort_key"],
+                "data": data,
+                "record": result_record,
+            }
     return latest_by_user_rule
 
 
@@ -1306,7 +1322,13 @@ def build_group_export_payload(
     user_end: int = 30,
     selected_rule: Optional[str] = None,
 ) -> Optional[Dict]:
-    latest_by_user_rule = collect_latest_results_by_user_rule(result_payloads, user_start, user_end)
+    active_record_lookup = load_active_record_lookup()
+    latest_by_user_rule = collect_latest_results_by_user_rule(
+        result_payloads,
+        user_start,
+        user_end,
+        active_record_lookup=active_record_lookup,
+    )
     if not latest_by_user_rule:
         return None
 
