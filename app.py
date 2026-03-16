@@ -138,6 +138,57 @@ def safe_div(numerator: float, denominator: float) -> float:
     return float(numerator) / float(denominator) if denominator else 0.0
 
 
+def normalize_record_row(record: Dict) -> Dict:
+    return {key: record.get(key) for key in RECORD_COLUMNS}
+
+
+def record_dedupe_key(record: Dict) -> tuple[str, str]:
+    username = str(record.get("username", "")).strip()
+    mode = str(record.get("mode", "")).strip()
+    return username, mode
+
+
+def record_rank(record: Dict) -> tuple[float, int, int, tuple[int, str]]:
+    try:
+        accuracy = float(record.get("accuracy", 0) or 0)
+    except (TypeError, ValueError):
+        accuracy = 0.0
+    try:
+        score = int(record.get("score", 0) or 0)
+    except (TypeError, ValueError):
+        score = 0
+    try:
+        total = int(record.get("total", 0) or 0)
+    except (TypeError, ValueError):
+        total = 0
+    sort_key = record.get("_sort_key", (0, ""))
+    if not isinstance(sort_key, tuple) or len(sort_key) != 2:
+        sort_key = (0, "")
+    return accuracy, score, total, sort_key
+
+
+def dedupe_record_rows(records: List[Dict]) -> List[Dict]:
+    best_by_key: Dict[tuple[str, str], Dict] = {}
+    for raw_record in records:
+        record = dict(raw_record)
+        key = record_dedupe_key(record)
+        if not key[0]:
+            continue
+        current = best_by_key.get(key)
+        if current is None or record_rank(record) > record_rank(current):
+            best_by_key[key] = record
+
+    def sort_key(record: Dict) -> tuple[tuple[int, str], str]:
+        username, mode = record_dedupe_key(record)
+        try:
+            user_sort = (0, f"{int(username):04d}")
+        except (TypeError, ValueError):
+            user_sort = (1, username)
+        return user_sort, mode
+
+    return [normalize_record_row(record) for record in sorted(best_by_key.values(), key=sort_key)]
+
+
 def normalize_template_value(template_name: str, default: RuleTemplate) -> str:
     """把 meta 中的规则名标准化为当前语义（Copy 归并到 Distribute-three）。"""
     try:
@@ -1103,10 +1154,10 @@ def build_result(
 
 
 def append_record(record: Dict) -> None:
-    df = load_records()
-    new_row = pd.DataFrame([{key: record.get(key) for key in RECORD_COLUMNS}], columns=RECORD_COLUMNS)
-    updated = pd.concat([df, new_row], ignore_index=True)
-    updated.to_csv(RECORDS_PATH, index=False)
+    existing_records = load_records().to_dict("records")
+    existing_records.append(normalize_record_row(record))
+    deduped_rows = dedupe_record_rows(existing_records)
+    pd.DataFrame(deduped_rows, columns=RECORD_COLUMNS).to_csv(RECORDS_PATH, index=False)
 
 
 def safe_slug(text: str) -> str:
@@ -1128,6 +1179,29 @@ def load_records() -> pd.DataFrame:
     if list(df.columns) != RECORD_COLUMNS:
         normalized_df.to_csv(RECORDS_PATH, index=False)
     return normalized_df
+
+
+def build_record_from_result(result: Dict, sort_key: Optional[tuple[int, str]] = None) -> Dict:
+    reason_payload = {
+        "error_type_ratio": result.get("error_type_ratio", {}),
+        "error_attribute_rate": result.get("error_attribute_rate", {}),
+        "error_attribute_ratio_normalized": result.get("error_attribute_ratio_normalized", {}),
+        "attribute_exposure_ratio": result.get("attribute_exposure_ratio", {}),
+        "error_perturbation_ratio": result.get("error_perturbation_ratio", {}),
+        "perturbation_exposure_ratio": result.get("perturbation_exposure_ratio", {}),
+        "error_reason_ratio": result.get("error_reason_ratio", {}),
+    }
+    record = {
+        "username": str(result.get("username", "")).strip(),
+        "mode": mode_display_name(str(result.get("mode", ""))),
+        "score": int(result.get("score", 0) or 0),
+        "total": int(result.get("total", 0) or 0),
+        "accuracy": float(result.get("accuracy", 0) or 0),
+        "reason": json.dumps(reason_payload, ensure_ascii=False),
+    }
+    if sort_key is not None:
+        record["_sort_key"] = sort_key
+    return record
 
 
 def _result_file_sort_key(path: Path) -> tuple[int, str]:
@@ -1165,6 +1239,22 @@ def load_result_payloads() -> List[Dict]:
             }
         )
     return payloads
+
+
+def rebuild_exam_records_from_results(result_payloads: List[Dict]) -> pd.DataFrame:
+    candidate_rows = []
+    for item in result_payloads:
+        data = item.get("data", {})
+        if not isinstance(data, dict):
+            continue
+        record = build_record_from_result(data, sort_key=item.get("sort_key"))
+        if not str(record.get("username", "")).strip():
+            continue
+        candidate_rows.append(record)
+    deduped_rows = dedupe_record_rows(candidate_rows)
+    rebuilt_df = pd.DataFrame(deduped_rows, columns=RECORD_COLUMNS)
+    rebuilt_df.to_csv(RECORDS_PATH, index=False)
+    return rebuilt_df
 
 
 def infer_result_rule_name(result_data: Dict) -> str:
@@ -1473,6 +1563,14 @@ def render_admin() -> None:
         )
 
     result_payloads = load_result_payloads()
+    if st.button("从 results 重建考试记录"):
+        if not result_payloads:
+            st.warning("未找到 `results/*.json`，无法重建考试记录。")
+        else:
+            rebuilt_df = rebuild_exam_records_from_results(result_payloads)
+            st.success(f"已根据 results 重建考试记录，当前保留 {len(rebuilt_df)} 条最高正确率记录。")
+            st.rerun()
+
     if not result_payloads:
         st.info("未找到 `results/*.json` 结果文件，暂时无法生成用户 1-30 的整体汇总导出。")
         return
@@ -1925,23 +2023,7 @@ def render_exam() -> None:
         persistent_path = RESULTS_DIR / filename
         persistent_path.write_text(st.session_state.result_json, encoding="utf-8")
         if not st.session_state.result_saved:
-            reason_payload = {
-                "error_type_ratio": result.get("error_type_ratio", {}),
-                "error_attribute_rate": result.get("error_attribute_rate", {}),
-                "error_attribute_ratio_normalized": result.get("error_attribute_ratio_normalized", {}),
-                "attribute_exposure_ratio": result.get("attribute_exposure_ratio", {}),
-                "error_perturbation_ratio": result.get("error_perturbation_ratio", {}),
-                "perturbation_exposure_ratio": result.get("perturbation_exposure_ratio", {}),
-                "error_reason_ratio": result.get("error_reason_ratio", {}),
-            }
-            record = {
-                "username": st.session_state.username,
-                "mode": mode_display_name(st.session_state.mode),
-                "score": result["score"],
-                "total": result["total"],
-                "accuracy": result["accuracy"],
-                "reason": json.dumps(reason_payload, ensure_ascii=False),
-            }
+            record = build_record_from_result(result)
             append_record(record)
             st.session_state.result_saved = True
 
