@@ -28,6 +28,7 @@ BIG_VIEW_GRID_SPACING = 4.2
 BIG_VIEW_ROW_DEPTH = 1.8
 BIG_VIEW_CAMERA_FIT_MARGIN = 1.0
 BIG_VIEW_MAX_RENDER_POINTS_PER_CLOUD = 3200
+SINGLE_VIEW_MAX_RENDER_POINTS = 2400
 
 # 规则名称映射
 RULE_NAMES = {
@@ -518,7 +519,12 @@ def render_page_banner(title: str, subtitle: str, eyebrow: str, chips: Optional[
     )
 
 
-def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: int = 0) -> None:
+def pl_component(
+    ply_content_str: str,
+    height: int = PLY_HEIGHT,
+    reset_nonce: int = 0,
+    max_render_points: int = SINGLE_VIEW_MAX_RENDER_POINTS,
+) -> None:
     import uuid
 
     container_id = f"pc_{reset_nonce}_{uuid.uuid4().hex}"
@@ -575,6 +581,40 @@ def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: in
       const blob = new Blob([plyText], {{ type: "text/plain" }});
       const url = URL.createObjectURL(blob);
 
+      const maxRenderPoints = {max_render_points};
+
+      function downsampleGeometry(geometry, maxPoints) {{
+        const posAttr = geometry.getAttribute("position");
+        if (!posAttr) return geometry;
+        const count = posAttr.count || 0;
+        if (!maxPoints || count <= maxPoints) return geometry;
+
+        const step = count / maxPoints;
+        const sampledPos = new Float32Array(maxPoints * 3);
+        const colorAttr = geometry.getAttribute("color");
+        const sampledColor = colorAttr ? new Float32Array(maxPoints * 3) : null;
+
+        for (let i = 0; i < maxPoints; i++) {{
+          const src = Math.min(count - 1, Math.floor(i * step));
+          sampledPos[i * 3] = posAttr.array[src * 3];
+          sampledPos[i * 3 + 1] = posAttr.array[src * 3 + 1];
+          sampledPos[i * 3 + 2] = posAttr.array[src * 3 + 2];
+          if (sampledColor) {{
+            sampledColor[i * 3] = colorAttr.array[src * 3];
+            sampledColor[i * 3 + 1] = colorAttr.array[src * 3 + 1];
+            sampledColor[i * 3 + 2] = colorAttr.array[src * 3 + 2];
+          }}
+        }}
+
+        const out = new THREE.BufferGeometry();
+        out.setAttribute("position", new THREE.BufferAttribute(sampledPos, 3));
+        if (sampledColor) {{
+          out.setAttribute("color", new THREE.BufferAttribute(sampledColor, 3));
+        }}
+        out.computeBoundingBox();
+        return out;
+      }}
+
       function fitCamera(geometry, material) {{
         geometry.computeBoundingBox();
         const box = geometry.boundingBox;
@@ -605,11 +645,12 @@ def pl_component(ply_content_str: str, height: int = PLY_HEIGHT, reset_nonce: in
         material.size = sizeVal;
       }}
 
-      loader.load(url, (geometry) => {{
-        URL.revokeObjectURL(url);
-        if (geometry.computeVertexNormals) {{
-          geometry.computeVertexNormals();
-        }}
+	      loader.load(url, (geometry) => {{
+	        URL.revokeObjectURL(url);
+	        geometry = downsampleGeometry(geometry, maxRenderPoints);
+	        if (geometry.computeVertexNormals) {{
+	          geometry.computeVertexNormals();
+	        }}
         const material = new THREE.PointsMaterial({{
           size: 1.0,
           vertexColors: true,
@@ -994,6 +1035,7 @@ def generate_exam(username: str, mode: str, difficulty: str) -> None:
     st.session_state.exam_generated = True
 
 
+@st.cache_data(show_spinner=False)
 def load_ply_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -1945,6 +1987,7 @@ def render_exam() -> None:
                             load_ply_text(resolve_ply_path(exam_root, candidate_paths[cand_idx])),
                             height=OPTION_PLY_HEIGHT,
                             reset_nonce=reset_nonce,
+                            max_render_points=1800,
                         )
                     else:
                         st.info("空")
