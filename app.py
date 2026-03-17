@@ -1521,9 +1521,9 @@ def build_group_export_payload(
 def render_admin() -> None:
     render_page_banner(
         "PCRAR 管理后台",
-        "查看考试记录、统计正确率，并管理导出数据。",
+        "导出用户 1-30 的整体与分规则表现数据。",
         "Admin Console",
-        chips=["记录管理", "统计分析", "CSV 导出"],
+        chips=["整体导出", "按规则导出"],
     )
     if st.button("退出登录"):
         reset_exam_state()
@@ -1532,67 +1532,7 @@ def render_admin() -> None:
         st.session_state.username = ""
         st.rerun()
 
-    df = load_records()
-    if df.empty:
-        st.info("暂无考试记录。")
-    else:
-        display_df = df.copy()
-        display_df["mode"] = display_df["mode"].apply(mode_display_name)
-
-        st.subheader("考试记录")
-        st.dataframe(display_df, use_container_width=True)
-
-        st.subheader("删除考试记录")
-        df = df.reset_index(drop=True)
-        display_df = display_df.reset_index(drop=True)
-        label_to_index = {}
-        option_labels = []
-        for idx, row in display_df.iterrows():
-            label = (
-                f"{idx + 1}: {row.get('username', '')} | {row.get('mode', '')} | "
-                f"{row.get('score', '')}/{row.get('total', '')} | {row.get('accuracy', '')}"
-            )
-            option_labels.append(label)
-            label_to_index[label] = idx
-        selected = st.multiselect("选择要删除的记录", option_labels)
-        if st.button("删除选中记录"):
-            if not selected:
-                st.warning("请先选择要删除的记录。")
-            else:
-                drop_indices = [label_to_index[label] for label in selected]
-                new_df = df.drop(index=drop_indices).reset_index(drop=True)
-                new_df.to_csv(RECORDS_PATH, index=False)
-                st.success(f"已删除 {len(drop_indices)} 条记录。")
-                st.rerun()
-
-        st.subheader("各用户正确率")
-        user_acc = df.groupby("username")["accuracy"].mean().sort_values(ascending=False)
-        st.bar_chart(user_acc)
-
-        st.subheader("各规则平均正确率")
-        mode_acc = display_df.groupby("mode")["accuracy"].mean()
-        rule_df = pd.DataFrame(
-            {"正确率": [mode_acc.get(name, 0.0) for name in ["递进", "循环", "增减", "守恒", "置换", "对称"]]},
-            index=["递进", "循环", "增减", "守恒", "置换", "对称"],
-        )
-        st.bar_chart(rule_df)
-
-        st.download_button(
-            "下载 CSV",
-            data=df.to_csv(index=False).encode("utf-8"),
-            file_name="exam_records.csv",
-            mime="text/csv",
-        )
-
     result_payloads = load_result_payloads()
-    if st.button("从 results 重建考试记录"):
-        if not result_payloads:
-            st.warning("未找到 `results/*.json`，无法重建考试记录。")
-        else:
-            rebuilt_df = rebuild_exam_records_from_results(result_payloads)
-            st.success(f"已根据 results 重建考试记录，当前保留 {len(rebuilt_df)} 条最高正确率记录。")
-            st.rerun()
-
     if not result_payloads:
         st.info("未找到 `results/*.json` 结果文件，暂时无法生成用户 1-30 的整体汇总导出。")
         return
